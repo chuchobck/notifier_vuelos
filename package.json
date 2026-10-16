@@ -21,6 +21,8 @@
     "start:prod": "node dist/main",
     "preeventos:breaking": "nest build",
     "eventos:breaking": "node dist/cli/eventos-breaking.js",
+    "presuscripciones:importar": "nest build",
+    "suscripciones:importar": "node dist/cli/importar-suscripciones.js",
     "test": "jest --config test/jest-e2e.json --runInBand",
     "test:e2e": "jest --config test/jest-e2e.json --runInBand"
   },

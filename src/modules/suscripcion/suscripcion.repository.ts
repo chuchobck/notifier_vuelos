@@ -35,6 +35,8 @@ export class SuscripcionRepository {
       eventos: readonly EventoWebhook[];
       activo?: boolean;
       fecha: Date;
+      /** La fecha de alta original (al importar del core); sin ella, `fecha`. */
+      fechaCreacion?: Date;
     },
   ): Promise<string> {
     const fila = await tx.suscripcion.create({
@@ -44,7 +46,7 @@ export class SuscripcionRepository {
         url: nueva.url,
         secreto_cifrado: nueva.secretoCifrado,
         activo: nueva.activo ?? true,
-        fecha_creacion: nueva.fecha,
+        fecha_creacion: nueva.fechaCreacion ?? nueva.fecha,
         fecha_actualizacion: nueva.fecha,
       },
       select: { id: true },
@@ -53,6 +55,24 @@ export class SuscripcionRepository {
       data: nueva.eventos.map((tipo) => ({ suscripcion_id: fila.id, tipo_evento: tipo })),
     });
     return fila.id;
+  }
+
+  /** Si existe una suscripción con ese id (activa o no). */
+  async existe(tx: TransaccionNotificaciones, id: string): Promise<boolean> {
+    return (await tx.suscripcion.count({ where: { id } })) > 0;
+  }
+
+  /** Si el usuario ya tiene una suscripción activa con esa URL. */
+  async tieneUrlActiva(
+    tx: TransaccionNotificaciones,
+    idPropietario: string,
+    url: string,
+  ): Promise<boolean> {
+    return (
+      (await tx.suscripcion.count({
+        where: { id_propietario: idPropietario, url, activo: true },
+      })) > 0
+    );
   }
 
   /** Las suscripciones activas del usuario, de la más vieja a la más nueva. */
