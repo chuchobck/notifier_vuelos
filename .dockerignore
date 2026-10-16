@@ -6,6 +6,7 @@ coverage
 .env.*
 *.pem
 *.key
+*.jsonl
 .git
 .gitignore
 .dockerignore
@@ -15,7 +16,9 @@ coverage
 docs
 test
 scripts
-contracts
 db
+# De contracts/ solo entra events/ (el Dockerfile lo copia); el resto es documentación
+contracts/asyncapi.yaml
+contracts/notifier-openapi.json
 # El cliente de Prisma se genera dentro de la imagen
 src/generated

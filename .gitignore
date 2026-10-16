@@ -28,3 +28,6 @@ npm-debug.log*
 
 # Cliente de Prisma: lo genera "prisma generate" (corre solo en npm install)
 /src/generated
+
+# Archivos de migración de suscripciones (traen secretos cifrados y URL de terceros)
+*.jsonl
