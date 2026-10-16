@@ -532,6 +532,30 @@ describe('Entrega de webhooks', () => {
       expect(tandas.flat().every((t) => t.intentos === 1)).toBe(true);
     });
 
+    it('una entrega bloqueada por otro proceso no frena a las demás (SKIP LOCKED, no espera)', async () => {
+      const { dueno, id, url } = await nueva();
+      await publicar(dueno, 3);
+      const [bloqueada, ...libres] = await entregasDe(id);
+      // Otro proceso tiene tomada una fila (su transacción sigue abierta) mientras esta corre
+      const resultado = await prisma.db.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`
+            SELECT id FROM notificaciones.entrega WHERE id = ${bloqueada.id} FOR UPDATE`;
+          return Promise.race([
+            entrega.ejecutar().then(() => 'termino'),
+            new Promise((r) => setTimeout(() => r('se quedo esperando'), 3000)),
+          ]);
+        },
+        { timeout: 10_000 },
+      );
+      expect(resultado).toBe('termino');
+      expect(cliente.de(url)).toHaveLength(libres.length);
+      expect((await entregasDe(id)).find((e) => e.id === bloqueada.id)?.estado).toBe('PENDIENTE');
+      // Al soltarla, la siguiente corrida la entrega
+      await entrega.ejecutar();
+      expect(cliente.de(url)).toHaveLength(3);
+    });
+
     it('dos instancias del servicio (dos apps) con 60 entregas: cada eventId llega exactamente una vez', async () => {
       const ruta = `/conc/${randomUUID()}`;
       const { dueno, id } = await nueva(['booking.confirmed'], receptor.url(ruta));

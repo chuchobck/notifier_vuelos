@@ -24,7 +24,8 @@
     "presuscripciones:importar": "nest build",
     "suscripciones:importar": "node dist/cli/importar-suscripciones.js",
     "test": "jest --config test/jest-e2e.json --runInBand",
-    "test:e2e": "jest --config test/jest-e2e.json --runInBand"
+    "test:e2e": "jest --config test/jest-e2e.json --runInBand",
+    "test:mutaciones": "node scripts/mutaciones.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.22",
