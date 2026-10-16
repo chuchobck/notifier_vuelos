@@ -30,4 +30,4 @@ Primera versión (Reto 2, fase 5a): la entrega de webhooks sale del core a un se
 - Operación: `/health` y `/health/ready`, X-Request-Id, logs JSON, helmet, CORS por lista, límites
   de peticiones con un reloj inyectable, auditoría de altas y bajas (sin secretos ni URL), Swagger
   con `contracts/notifier-openapi.json` versionado, Dockerfile sin privilegios y CI con PostgreSQL.
-- 253 pruebas e2e (10 suites) y 33 mutaciones (`npm run test:mutaciones`), todas detectadas.
+- 254 pruebas e2e (10 suites) y 33 mutaciones (`npm run test:mutaciones`), todas detectadas.

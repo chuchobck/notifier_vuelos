@@ -59,6 +59,16 @@ export class SuscripcionService {
           `At most ${MAXIMO_SUSCRIPCIONES_ACTIVAS} active webhooks per user; delete one first`,
         );
       }
+      // Con el candado del dueño tomado, nadie más le agrega una: se pregunta antes de insertar
+      // para que el índice único no salte (PostgreSQL dejaría la URL en su propio log). El índice
+      // sigue ahí como última barrera, con el mismo 409.
+      if (await this.repositorio.tieneUrlActiva(tx, idPropietario, solicitud.url)) {
+        throw new ErrorNegocio(
+          409,
+          CODIGO_SIN_EQUIVALENTE,
+          'A webhook with this URL already exists',
+        );
+      }
       const creada = await this.repositorio.crear(tx, {
         idPropietario,
         url: solicitud.url,

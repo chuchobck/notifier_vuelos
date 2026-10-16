@@ -1,6 +1,7 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import * as request from 'supertest';
+import { SuscripcionRepository } from '../src/modules/suscripcion/suscripcion.repository';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { esperarWebhookSubscription } from './utils/contrato';
 import { crearApp } from './utils/crear-app';
@@ -189,6 +190,19 @@ describe('/flights/v1/webhooks: registrar, listar y dar de baja', () => {
       esperarProblemDetails(repetida);
       expect(repetida.body.detail).toBe('A webhook with this URL already exists');
       await registrar(otro, solicitud).expect(201);
+    });
+
+    it('la URL repetida se rechaza antes de insertar: el índice único no salta (PostgreSQL no deja la URL en su log)', async () => {
+      const solicitud = cuerpo();
+      await registrar(cliente, solicitud).expect(201);
+      const crear = jest.spyOn(app.get(SuscripcionRepository), 'crear');
+      try {
+        const repetida = await registrar(cliente, solicitud).expect(409);
+        expect(repetida.body.detail).toBe('A webhook with this URL already exists');
+        expect(crear).not.toHaveBeenCalled();
+      } finally {
+        crear.mockRestore();
+      }
     });
 
     it('con la URL de una suscripción dada de baja se puede registrar de nuevo', async () => {

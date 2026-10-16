@@ -63,18 +63,25 @@ export class SuscripcionRepository {
   }
 
   /**
-   * Si el usuario ya tiene OTRA suscripción activa (un id distinto de `salvoId`) con esa URL. Que
-   * sea otra importa al importar: una importación simultánea del mismo archivo puede confirmar esa
-   * misma suscripción entre dos consultas (READ COMMITTED), y no es un choque de URL.
+   * Si el usuario ya tiene otra suscripción activa con esa URL (con `salvoId`, una de id distinto).
+   * Se pregunta antes de insertar para no chocar con uq_suscripcion_propietario_url: PostgreSQL
+   * escribe en SU log el DETAIL de esa violación, con la URL completa. `salvoId` importa al
+   * importar: una importación simultánea del mismo archivo puede confirmar esa misma suscripción
+   * entre dos consultas (READ COMMITTED), y no es un choque de URL.
    */
   async tieneUrlActiva(
     tx: TransaccionNotificaciones,
     idPropietario: string,
     url: string,
-    salvoId: string,
+    salvoId?: string,
   ): Promise<boolean> {
     const otras = await tx.suscripcion.count({
-      where: { id_propietario: idPropietario, url, activo: true, id: { not: salvoId } },
+      where: {
+        id_propietario: idPropietario,
+        url,
+        activo: true,
+        ...(salvoId === undefined ? {} : { id: { not: salvoId } }),
+      },
     });
     return otras > 0;
   }

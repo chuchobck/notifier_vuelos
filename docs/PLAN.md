@@ -8,7 +8,7 @@ de entregar: guarda cada evento en su propia bandeja y lo publica aquí.
 
 | Fase | Estado | Verificación |
 | --- | --- | --- |
-| 5a. Notifier | Hecha (2026-10-16), en `feat/r2-notifier` | `lint`, `format:check` y `build` en cada commit. `npm test`: 253 pruebas en 10 suites contra PostgreSQL 16 local, en verde varias veces seguidas sobre el código final. `npm run test:mutaciones`: 33 de 33 mutaciones detectadas. `npm run eventos:breaking` contra `origin/main`: los 12 esquemas como archivos nuevos (compatible). AsyncAPI validado con `@asyncapi/cli` 6.2.1 (y un `$ref` roto lo hace fallar). Verificación real con identity_vuelos (con el parche local de `events:publish`, ver Hallazgos) y un receptor local: 201 al suscribir, 403 al publicar con el token de la persona, 202 al publicar con el del core, 200 al repetirlo, el receptor recibió el POST y la firma recalculada con `openssl` coincidió; con identity caída y el notifier recién arrancado, 503 `AUTH_UNAVAILABLE` con `Retry-After: 10`, y al volver, 202. Salidas en el reporte del pull request |
+| 5a. Notifier | Hecha (2026-10-16), en `feat/r2-notifier` | `lint`, `format:check` y `build` en cada commit. `npm test`: 254 pruebas en 10 suites contra PostgreSQL 16 local y 18.6 en CI, en verde varias veces seguidas sobre el código final. `npm run test:mutaciones`: 33 de 33 mutaciones detectadas. `npm run eventos:breaking` contra `origin/main`: los 12 esquemas como archivos nuevos (compatible). AsyncAPI validado con `@asyncapi/cli` 6.2.1 (y un `$ref` roto lo hace fallar). Verificación real con identity_vuelos (con el parche local de `events:publish`, ver Hallazgos) y un receptor local: 201 al suscribir, 403 al publicar con el token de la persona, 202 al publicar con el del core, 200 al repetirlo, el receptor recibió el POST y la firma recalculada con `openssl` coincidió; con identity caída y el notifier recién arrancado, 503 `AUTH_UNAVAILABLE` con `Retry-After: 10`, y al volver, 202. Salidas en el reporte del pull request |
 | 5b. Core publica aquí | Pendiente (repo del core) | — |
 
 ## Qué se copió y qué cambió
@@ -62,14 +62,16 @@ Las marcadas con **(sin consultar)** se tomaron durante la fase sin poder pregun
 13. `feat(openapi): exportar contracts/notifier-openapi.json y probar que esté al día`
 14. `build(despliegue): agregar Dockerfile sin privilegios, CI con PostgreSQL y docs/DEPLOY.md`
 15. `docs: agregar CLAUDE.md, README, CHANGELOG 0.1.0 y el plan con el cierre de la fase 5a`
+16. `fix(suscripciones): rechazar la URL repetida antes de insertar para que PostgreSQL no la registre`
 
 ## Qué no se pudo verificar
 
 - **La imagen de Docker en local**: Docker Hub respondió 429 al bajar `node:22-bookworm-slim`, y
   dentro de un contenedor de este entorno npm no confía en la CA del proxy. La construye el job
-  `imagen` del CI (uid 1000 y los 12 esquemas adentro).
+  `imagen` del CI, que pasó (uid 1000 y los 12 esquemas adentro). No se corrió el contenedor contra
+  una base.
 - **actionlint**: no se pudo instalar aquí; el YAML del workflow parsea y lo ejercita el CI.
-- **PostgreSQL 18**: las pruebas locales corrieron sobre PostgreSQL 16; el CI usa 18.
+- **PostgreSQL 18 en local**: las pruebas locales corrieron sobre PostgreSQL 16; en CI pasan sobre 18.6.
 - **identity sin parche**: con el identity de `main`, `cliente:crear --scopes events:publish` falla
   (el scope no existe). La verificación real usó la copia parcheada.
 
@@ -83,6 +85,7 @@ Las marcadas con **(sin consultar)** se tomaron durante la fase sin poder pregun
 | v2 copiada de la v1 | Conserva el `$id` y Ajv rechaza el segundo esquema con el mismo id; el servicio no arrancaba con un mensaje confuso | Regla de forma: el `$id` termina en el nombre del archivo (commit 10). Lo encontró la prueba de convivencia v1/v2 |
 | `SKIP LOCKED` y las pruebas de concurrencia | Sin `SKIP LOCKED` (con `FOR UPDATE` solo) las dos pruebas de concurrencia seguían en verde: Postgres reevalúa la fila bloqueada y no duplica, solo espera | Nueva prueba: una fila tomada por otro proceso no frena la corrida (3 s). Sin `FOR UPDATE` del todo, la de 4 reclamos a la vez tampoco falló aquí (no se cruzaron); la nueva lo nota igual |
 | `ConfigService` y `process.env` | `new ConfigService({ X })` devuelve el `process.env.X` si existe, no el del objeto | Solo afectó a un dato de prueba armado a mano; el importador usa el entorno a propósito |
+| PostgreSQL registra la URL de un 409 | El log del servicio PostgreSQL del CI mostró el `DETAIL` de la violación de `uq_suscripcion_propietario_url`: `Key (id_propietario, url)=(…, http://…?token=…)`. Es el log de la base, fuera de la app, pero deja la URL (y su token) donde nadie la busca | Con el candado del dueño tomado, la URL repetida se pregunta antes de insertar y responde el mismo 409 sin llegar al índice (commit 16). El índice sigue como última barrera. El core tiene el mismo comportamiento |
 | El Logger de Nest es global | Una app creada en una prueba sin `logs` apagaba los logs de las pruebas siguientes del mismo archivo | Las apps de una misma prueba comparten el arreglo de logs |
 
 ## Pendientes
