@@ -3,8 +3,10 @@ import { ConfigModule } from '@nestjs/config';
 import { RouterModule } from '@nestjs/core';
 import { CommonModule } from './common/common.module';
 import { validarEntorno } from './config/entorno';
+import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { AutenticacionModule } from './modules/auth/autenticacion.module';
 import { SaludModule } from './modules/salud/salud.module';
+import { SuscripcionModule } from './modules/suscripcion/suscripcion.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { rutas } from './routes/index.routes';
 
@@ -23,6 +25,8 @@ import { rutas } from './routes/index.routes';
     CommonModule,
     AutenticacionModule,
     SaludModule,
+    AuditoriaModule,
+    SuscripcionModule,
 
     // Tabla de rutas: src/routes/index.routes.ts
     RouterModule.register(rutas),

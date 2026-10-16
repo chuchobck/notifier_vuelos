@@ -8,6 +8,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
   Validate,
   ValidationArguments,
   ValidatorConstraint,
@@ -19,6 +20,7 @@ import { esOrigenValido, listarOrigenes } from './origenes-cors';
 import { parsearTrustProxy } from './proxy';
 
 export const ENTORNOS = ['development', 'production', 'test'] as const;
+export const LARGO_MINIMO_WEBHOOK_KEY = 32;
 export type Entorno = (typeof ENTORNOS)[number];
 
 @ValidatorConstraint({ name: 'listaDeOrigenes' })
@@ -97,6 +99,20 @@ export class VariablesEntorno {
 
   @IsIn(ENTORNOS, { message: `NODE_ENV es obligatorio y debe ser uno de: ${ENTORNOS.join(', ')}` })
   NODE_ENV!: Entorno;
+
+  /**
+   * Clave con la que se cifra el secreto de cada suscripción (AES-256-GCM, derivada con HKDF).
+   * Hace falta porque el secreto se necesita en claro para firmar las entregas. Obligatoria, de al
+   * menos 32 caracteres. Para migrar las suscripciones del core sin que los terceros cambien su
+   * secreto, tiene que ser la MISMA WEBHOOK_SECRET_KEY del core (docs/MIGRACION.md). Cambiarla
+   * deja ilegibles los secretos ya guardados. Generar con:
+   *   node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+   */
+  @MinLength(LARGO_MINIMO_WEBHOOK_KEY, {
+    message: `WEBHOOK_SECRET_KEY debe tener al menos ${LARGO_MINIMO_WEBHOOK_KEY} caracteres`,
+  })
+  @IsString({ message: 'WEBHOOK_SECRET_KEY es obligatoria' })
+  WEBHOOK_SECRET_KEY!: string;
 
   /**
    * `iss` de los tokens que se aceptan: el JWT_ISSUER del servicio de identidad, un origen sin

@@ -177,7 +177,8 @@ CREATE TABLE auditoria (
     id_peticion     text,
     CONSTRAINT pk_auditoria PRIMARY KEY (id),
     CONSTRAINT fk_auditoria_suscripcion FOREIGN KEY (suscripcion_id) REFERENCES suscripcion (id) ON DELETE RESTRICT,
-    CONSTRAINT ck_auditoria_host CHECK (host_destino IS NULL OR host_destino ~ '^[^/?#@[:space:]]{1,300}$'),
+    -- Sin repetición {1,300}: PostgreSQL no admite más de 255 en una expresión regular
+    CONSTRAINT ck_auditoria_host CHECK (host_destino IS NULL OR (host_destino ~ '^[^/?#@[:space:]]+$' AND length(host_destino) <= 300)),
     CONSTRAINT ck_auditoria_motivo CHECK (motivo IS NULL OR motivo ~ '^[A-Z0-9_]{2,40}$'),
     CONSTRAINT ck_auditoria_id_peticion CHECK (id_peticion IS NULL OR id_peticion ~ '^[A-Za-z0-9][A-Za-z0-9._-]{7,63}$')
 );
