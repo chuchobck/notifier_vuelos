@@ -1,0 +1,7 @@
+# Finales de línea LF siempre, también al clonar desde Windows.
+# Un .sh o .sql con CRLF falla dentro del contenedor de PostgreSQL.
+* text=auto eol=lf
+*.sh  text eol=lf
+*.sql text eol=lf
+*.png binary
+*.jpg binary

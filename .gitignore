@@ -1,0 +1,30 @@
+# Compilado y dependencias
+/dist
+/node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Sistema operativo y editores
+.DS_Store
+/.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Pruebas
+/coverage
+
+# Variables de entorno: solo .env.example va en git. Nunca una clave ni un secreto.
+.env
+.env.*
+!.env.example
+
+# Claves generadas a mano: nunca en git
+*.pem
+*.key
+
+# Cliente de Prisma: lo genera "prisma generate" (corre solo en npm install)
+/src/generated

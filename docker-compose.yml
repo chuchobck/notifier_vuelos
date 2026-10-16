@@ -1,0 +1,27 @@
+# Base de datos local del notifier. Aparte de la del core (5432) y la de identity (5433): este
+# contenedor publica el 5434 para que los tres puedan correr a la vez.
+name: quinde-notifier
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: quinde_notifier_db
+    ports:
+      # El puerto del host se cambia con DB_PORT en .env (compose lo lee solo).
+      - '${DB_PORT:-5434}:5432'
+    environment:
+      POSTGRES_DB: notifier_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      # Desde la imagen 18 los datos viven en /var/lib/postgresql/<versión>/docker.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d notifier_db']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:

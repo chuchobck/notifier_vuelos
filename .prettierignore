@@ -1,0 +1,13 @@
+dist
+coverage
+node_modules
+src/generated
+package-lock.json
+
+# SQL y documentos se mantienen a mano
+db
+docs
+*.md
+
+# Generado por npm run openapi:export (una prueba lo compara)
+contracts/notifier-openapi.json

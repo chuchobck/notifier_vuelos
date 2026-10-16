@@ -1,0 +1,117 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  previewFeatures     = ["partialIndexes"]
+  importFileExtension = ""
+  moduleFormat        = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model auditoria {
+  id             BigInt           @id(map: "pk_auditoria") @default(autoincrement())
+  fecha          DateTime         @default(now()) @db.Timestamptz(6)
+  accion         accion_auditoria
+  suscripcion_id String           @db.Uuid
+  id_propietario String
+  actor          String?
+  host_destino   String?
+  eventos        String[]         @default([])
+  motivo         String?
+  direccion_ip   String?          @db.Inet
+  id_peticion    String?
+  suscripcion    suscripcion      @relation(fields: [suscripcion_id], references: [id], onUpdate: NoAction, map: "fk_auditoria_suscripcion")
+
+  @@index([fecha], map: "ix_auditoria_fecha")
+  @@index([suscripcion_id, fecha], map: "ix_auditoria_suscripcion")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model entrega {
+  id                  BigInt         @id(map: "pk_entrega") @default(autoincrement())
+  suscripcion_id      String         @db.Uuid
+  id_evento           String         @db.Uuid
+  cuerpo              Json
+  estado              estado_entrega @default(PENDIENTE)
+  intentos            Int            @default(0) @db.SmallInt
+  proximo_intento     DateTime       @db.Timestamptz(6)
+  ultimo_codigo_http  Int?           @db.SmallInt
+  ultimo_error        String?
+  fecha_creacion      DateTime       @default(now()) @db.Timestamptz(6)
+  fecha_actualizacion DateTime       @default(now()) @db.Timestamptz(6)
+  evento              evento         @relation(fields: [id_evento], references: [id_evento], onUpdate: NoAction, map: "fk_entrega_evento")
+  suscripcion         suscripcion    @relation(fields: [suscripcion_id], references: [id], onUpdate: NoAction, map: "fk_entrega_suscripcion")
+
+  @@unique([suscripcion_id, id_evento], map: "uq_entrega_suscripcion_evento")
+  @@index([id_evento], map: "ix_entrega_evento")
+  @@index([proximo_intento, id], map: "ix_entrega_pendiente", where: raw("(estado = 'PENDIENTE'::estado_entrega)"))
+  @@index([suscripcion_id, fecha_actualizacion(sort: Desc)], map: "ix_entrega_suscripcion", where: raw("(estado <> 'PENDIENTE'::estado_entrega)"))
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model evento {
+  id              BigInt    @id(map: "pk_evento") @default(autoincrement())
+  id_evento       String    @unique(map: "uq_evento_id_evento") @db.Uuid
+  tipo            String
+  version_esquema String
+  id_propietario  String
+  payload         Json
+  ocurrido_en     DateTime  @db.Timestamptz(6)
+  recibido_en     DateTime  @db.Timestamptz(6)
+  huella          String
+  publicado_por   String
+  entrega         entrega[]
+
+  @@index([id_propietario, recibido_en], map: "ix_evento_propietario")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model suscripcion {
+  id                  String               @id(map: "pk_suscripcion") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id_propietario      String
+  url                 String
+  secreto_cifrado     String
+  activo              Boolean              @default(true)
+  fecha_creacion      DateTime             @default(now()) @db.Timestamptz(6)
+  fecha_actualizacion DateTime             @default(now()) @db.Timestamptz(6)
+  auditoria           auditoria[]
+  entrega             entrega[]
+  suscripcion_evento  suscripcion_evento[]
+
+  @@unique([id_propietario, url], map: "uq_suscripcion_propietario_url", where: raw("activo"))
+  @@index([id_propietario, fecha_creacion], map: "ix_suscripcion_propietario", where: raw("activo"))
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model suscripcion_evento {
+  id             BigInt      @id(map: "pk_suscripcion_evento") @default(autoincrement())
+  suscripcion_id String      @db.Uuid
+  tipo_evento    String
+  suscripcion    suscripcion @relation(fields: [suscripcion_id], references: [id], onUpdate: NoAction, map: "fk_suscripcion_evento_suscripcion")
+
+  @@unique([suscripcion_id, tipo_evento], map: "uq_suscripcion_evento")
+  @@index([tipo_evento, suscripcion_id], map: "ix_suscripcion_evento_tipo")
+}
+
+/// This enum is commented in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+enum accion_auditoria {
+  SUSCRIPCION_CREADA
+  SUSCRIPCION_ELIMINADA
+  SUSCRIPCION_DESACTIVADA
+  SUSCRIPCION_IMPORTADA
+}
+
+/// This enum is commented in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+enum estado_entrega {
+  PENDIENTE
+  ENTREGADO
+  FALLIDO
+}
