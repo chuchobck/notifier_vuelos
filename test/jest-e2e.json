@@ -1,0 +1,19 @@
+{
+  "rootDir": "..",
+  "testEnvironment": "node",
+  "testRegex": "test/.*\\.e2e-spec\\.ts$",
+  "setupFiles": ["<rootDir>/test/utils/entorno-pruebas.ts"],
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "transform": {
+    "/node_modules/jose/.+\\.js$": "<rootDir>/test/utils/transformar-jose.js",
+    "^.+\\.ts$": [
+      "ts-jest",
+      {
+        "tsconfig": "tsconfig.json",
+        "diagnostics": false
+      }
+    ]
+  },
+  "transformIgnorePatterns": ["/node_modules/(?!jose/)"],
+  "testTimeout": 30000
+}

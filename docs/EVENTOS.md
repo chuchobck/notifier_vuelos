@@ -1,0 +1,132 @@
+# Contrato de eventos
+
+El core (backend_vuelos) publica cada hecho de negocio en este servicio con
+`POST /internal/v1/events`. El notifier lo guarda una sola vez por `eventId`, lo reparte a las
+suscripciones activas del dueño que escuchan ese tipo y lo entrega firmado al tercero. Este
+documento es el contrato entre los dos lados: qué publica el core, qué recibe el tercero y cómo
+cambia un evento sin romper a nadie.
+
+- Esquemas: [`contracts/events/<tipo>.v<mayor>.json`](../contracts/events/) (JSON Schema draft-07,
+  uno por tipo y versión mayor).
+- Canal: [`contracts/asyncapi.yaml`](../contracts/asyncapi.yaml) (AsyncAPI 3.0, validado en CI).
+- Comprobación: `npm run eventos:breaking` (compara con `main`; corre en cada pull request).
+
+## El sobre (lo que publica el core)
+
+```json
+{
+  "eventId": "5f8d2c1e-7a3b-4e9d-8c6f-000000000000",
+  "eventType": "booking.confirmed",
+  "schemaVersion": "1.0",
+  "occurredAt": "2026-10-16T14:30:00.000Z",
+  "ownerId": "0b7c9f4e-3d2a-4b1c-8e5f-6a7b8c9d0e1f",
+  "data": { "bookingId": "3f0c6a9e-2b1d-4c8e-9a7f-5d4e3c2b1a09", "pnr": "Q7K2MX", "status": "CONFIRMED" }
+}
+```
+
+| Campo | Regla |
+| --- | --- |
+| `eventId` | uuid. Identifica el hecho: el mismo para todas las suscripciones y para cada reintento de publicación. Es la clave de idempotencia |
+| `eventType` | Uno de los 12 tipos de `WebhookSubscription.events` del contrato del core |
+| `schemaVersion` | `mayor.menor` (`"1.0"`). El mayor elige el archivo (`<tipo>.v1.json`); el menor tiene que estar en su `schemaVersion.enum` |
+| `occurredAt` | ISO 8601 en UTC con sufijo `Z` (sin desfase horario). Cuándo pasó el hecho en el core |
+| `ownerId` | uuid. El `sub` del token con que se creó el recurso (`id_propietario`). Solo las suscripciones de ese dueño reciben el evento |
+| `data` | Lo propio de cada tipo (tabla de abajo). `additionalProperties: false`: nada que el esquema no declare llega al tercero |
+
+El sobre tampoco admite campos de más. Un campo nuevo se agrega **primero al esquema** (cambio
+compatible, se despliega el notifier) y **después** el core lo empieza a mandar.
+
+## Lo que recibe el tercero
+
+El `WebhookPayload` del contrato GDS Flight Core API 1.5.0.0, el mismo que mandaba el core:
+
+```json
+{
+  "eventId": "5f8d2c1e-7a3b-4e9d-8c6f-000000000000",
+  "eventType": "booking.confirmed",
+  "occurredAt": "2026-10-16T14:30:00.000Z",
+  "apiVersion": "1.5.0",
+  "data": { "bookingId": "3f0c6a9e-2b1d-4c8e-9a7f-5d4e3c2b1a09", "pnr": "Q7K2MX", "status": "CONFIRMED" }
+}
+```
+
+- `occurredAt` sale normalizado con milisegundos (`toISOString`), como lo armaba el core.
+- `apiVersion` es `1.5.0` (el `info.version` del contrato del core sin el cuarto número). No es la
+  `schemaVersion` del sobre: esa es un acuerdo entre el core y el notifier.
+- El cuerpo se arma y se congela al recibir el evento: cada reintento envía exactamente los mismos
+  bytes.
+- Cabeceras: `Content-Type: application/json`, `X-Webhook-Event` (el `eventType`), `X-Webhook-Id`
+  (el `eventId`), `X-Webhook-Timestamp` (segundos desde 1970) y
+  `X-Webhook-Signature: sha256=<hex>`, el HMAC-SHA256 de `"<timestamp>.<cuerpo>"` con el secreto
+  de la suscripción. Iguales a las del core: un tercero no cambia nada al pasar al notifier.
+
+## `data` por tipo (v1)
+
+| Tipo | Campos de `data` (obligatorios salvo que se diga) |
+| --- | --- |
+| `booking.confirmed`, `booking.failed`, `booking.changed`, `booking.baggage_added`, `booking.ticket_issuing`, `booking.ticket_issued`, `booking.ticket_failed`, `booking.checked_in` | `bookingId` (uuid), `pnr` (`^[A-Z0-9]{6}$`), `status` (`BookingDetail.status`: `PENDING`, `PENDING_PAYMENT`, `TICKET_ISSUING`, `CONFIRMED`, `FAILED`, `CHANGE_PENDING`, `CANCELLATION_PENDING`, `CANCELLED`) |
+| `booking.cancelled` | Los mismos tres, y `refundAmount` **opcional** (texto decimal, `"35.00"`): solo si la cancelación tuvo una cotización aceptada |
+| `hold.expired` | `holdId` (uuid) y `status` (siempre `EXPIRED`) |
+| `flight.schedule_changed`, `flight.cancelled` | `bookingId`, `pnr`, `status`, `flightNumber` (`^[A-Z0-9]{2}[1-9][0-9]{0,3}$`, como `EQ1234`) y `segmentId` (uuid de la salida). Un evento por cada reserva viva de esa salida, cada uno con su `eventId` |
+
+`status` es el de la reserva **en el momento del evento**, no el de ahora (`booking.ticket_issued`
+llega con `TICKET_ISSUING`). Son los campos que el core ya mandaba en su `INSERT ... SELECT` de la
+fase 10; ninguno es un dato personal del pasajero.
+
+## Versiones y compatibilidad
+
+Cada archivo cubre **una versión mayor** de un tipo y lista en `schemaVersion.enum` los menores que
+acepta. Dentro de un mayor solo se hacen cambios **compatibles**: el core puede seguir publicando lo
+de antes y el tercero sigue recibiendo lo que esperaba.
+
+| Cambio | ¿Compatible? | Cómo se hace |
+| --- | --- | --- |
+| Agregar un campo **opcional** | Sí | En el mismo archivo; si el core lo va a mandar, se agrega también un menor (`"1.1"`) a `schemaVersion.enum` |
+| Agregar un valor a un `enum` (un menor de `schemaVersion`, un estado nuevo) | Sí | En el mismo archivo |
+| Cambiar `title`, `description` o `examples` | Sí | En el mismo archivo |
+| Quitar o renombrar un campo | **No** | Versión mayor nueva |
+| Volver obligatorio un campo opcional, o agregar uno nuevo obligatorio | **No** | Versión mayor nueva |
+| Volver opcional un campo obligatorio | **No** (el tercero contaba con él) | Versión mayor nueva |
+| Cambiar el tipo, el formato, el patrón, un largo o cualquier restricción | **No** | Versión mayor nueva |
+| Quitar un valor de un `enum` | **No** | Versión mayor nueva |
+| Borrar el archivo de una versión | **No** | Solo cuando el core ya no la publique (y en un pull request que lo diga) |
+
+Una versión mayor nueva es otro archivo, `<tipo>.v2.json`, con `schemaVersion.enum: ["2.0"]`.
+**Convive con la v1**: el notifier acepta las dos y el core pasa de una a otra cuando quiera. La v1
+se borra recién cuando el core deja de publicarla (ese pull request falla en `eventos:breaking` a
+propósito y se aprueba a mano).
+
+### `npm run eventos:breaking`
+
+Compara cada archivo de `contracts/events` con el de `origin/main` (u otra referencia:
+`npm run eventos:breaking -- origin/otra`) y sale con:
+
+- `0` si todo es compatible (un archivo nuevo, una versión mayor nueva, un campo opcional, un valor
+  más en un enum, cambios de texto);
+- `1` si hay un cambio incompatible o un archivo mal formado (nombre que no es
+  `<tipo>.v<mayor>.json`, un tipo que no es de los 12, `eventType` distinto del nombre, versiones de
+  otro mayor, un sobre sin sus seis campos o sin `additionalProperties: false`);
+- `2` si no pudo comparar (la referencia no existe: `git fetch origin main`).
+
+El servicio aplica las mismas reglas de forma al arrancar: con un archivo mal formado, o sin el v1
+de alguno de los 12 tipos, no levanta.
+
+## Respuestas de `POST /internal/v1/events`
+
+| Status | Cuándo |
+| --- | --- |
+| `202` | Primera vez de ese `eventId`: el evento y sus entregas quedaron guardados (después del commit) |
+| `200` | El `eventId` ya existía con el mismo contenido: no se duplicó nada |
+| `400` | El cuerpo no cumple el esquema de su tipo y versión (`invalidParams` nombra cada campo) |
+| `401` / `403` / `503` | Token ausente o inválido / sin `events:publish` o de una persona / JWKS de identity no disponible |
+| `409` | El `eventId` ya existía con **otro** contenido (un error del publicador) |
+| `415` / `413` | No es `application/json` / más de 100 kB |
+| `422` | `eventType` que no es uno de los 12, o `schemaVersion` que no tiene esquema |
+| `429` | Más de `EVENTS_RATE_LIMIT_MAX` publicaciones por minuto desde la misma IP |
+
+Cuerpo de `200` y `202`: `{ "eventId": "...", "deliveries": 2, "duplicate": false }`
+(`deliveries` es cuántas entregas tiene el evento).
+
+Para el publicador: `400`, `403`, `409`, `413`, `415` y `422` son errores suyos (no sirve
+reintentar); `429`, `503` y cualquier `5xx` se reintentan con espera. Como la publicación es
+idempotente por `eventId`, reintentar un evento que en realidad sí se guardó da `200`.
