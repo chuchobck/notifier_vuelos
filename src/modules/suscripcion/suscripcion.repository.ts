@@ -62,17 +62,21 @@ export class SuscripcionRepository {
     return (await tx.suscripcion.count({ where: { id } })) > 0;
   }
 
-  /** Si el usuario ya tiene una suscripción activa con esa URL. */
+  /**
+   * Si el usuario ya tiene OTRA suscripción activa (un id distinto de `salvoId`) con esa URL. Que
+   * sea otra importa al importar: una importación simultánea del mismo archivo puede confirmar esa
+   * misma suscripción entre dos consultas (READ COMMITTED), y no es un choque de URL.
+   */
   async tieneUrlActiva(
     tx: TransaccionNotificaciones,
     idPropietario: string,
     url: string,
+    salvoId: string,
   ): Promise<boolean> {
-    return (
-      (await tx.suscripcion.count({
-        where: { id_propietario: idPropietario, url, activo: true },
-      })) > 0
-    );
+    const otras = await tx.suscripcion.count({
+      where: { id_propietario: idPropietario, url, activo: true, id: { not: salvoId } },
+    });
+    return otras > 0;
   }
 
   /** Las suscripciones activas del usuario, de la más vieja a la más nueva. */

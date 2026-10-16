@@ -157,7 +157,7 @@ export class ImportadorSuscripciones {
         if (await this.repositorio.existe(tx, linea.id)) return { desenlace: 'existente' };
         if (
           linea.activo &&
-          (await this.repositorio.tieneUrlActiva(tx, linea.idPropietario, linea.url))
+          (await this.repositorio.tieneUrlActiva(tx, linea.idPropietario, linea.url, linea.id))
         ) {
           return {
             desenlace: 'rechazada',
