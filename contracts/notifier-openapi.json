@@ -1,0 +1,755 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "SaludController_vida",
+        "summary": "Chequeo de vida: el proceso responde (no mira la base)",
+        "description": "Sirve para reiniciar un contenedor colgado; una base caída no lo hace fallar.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VidaRespuestaDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Salud"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "SaludController_disponibilidad",
+        "summary": "Chequeo de disponibilidad: 200 solo si la base contesta",
+        "description": "Sirve para sacar la instancia del balanceador mientras la base no responde.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisponibilidadRespuestaDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "La base no responde",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Salud"
+        ]
+      }
+    },
+    "/flights/v1/webhooks": {
+      "get": {
+        "operationId": "SuscripcionController_listar",
+        "summary": "Listar suscripciones",
+        "description": "Las suscripciones activas del usuario. El secreto va enmascarado (**** y sus últimos 4 caracteres).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Suscripciones activas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token, no es válido o venció",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El token no trae los scopes requeridos: flights:webhooks",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Se pasó del límite de peticiones por IP",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No hay claves del servicio de identidad con las que verificar el token (AUTH_UNAVAILABLE)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "SuscripcionController_crear",
+        "summary": "Registrar webhook",
+        "description": "A lo sumo 10 suscripciones activas por usuario. Cada entrega es un POST con el WebhookPayload y las cabeceras X-Webhook-Event, X-Webhook-Id (eventId), X-Webhook-Timestamp (segundos desde 1970) y X-Webhook-Signature: sha256=<HMAC-SHA256 de \"timestamp.cuerpo\" con el secreto>. Se reintenta con espera creciente; respuesta 2xx = recibido.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SolicitudWebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook registrado (secreto enmascarado)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cuerpo inválido o URL que no es un destino permitido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token, no es válido o venció",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El token no trae los scopes requeridos: flights:webhooks",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya tiene 10 suscripciones activas o esa URL activa",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Más de 10 altas por IP en un minuto",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No hay claves del servicio de identidad con las que verificar el token (AUTH_UNAVAILABLE)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/flights/v1/webhooks/{id}": {
+      "delete": {
+        "operationId": "SuscripcionController_eliminar",
+        "summary": "Eliminar suscripción",
+        "description": "Baja lógica: deja de recibir eventos. Una suscripción ajena o que no está activa es 404.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Eliminado"
+          },
+          "400": {
+            "description": "id no es un uuid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token, no es válido o venció",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El token no trae los scopes requeridos: flights:webhooks",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La suscripción no existe, no está activa o es de otro usuario",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Se pasó del límite de peticiones por IP",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No hay claves del servicio de identidad con las que verificar el token (AUTH_UNAVAILABLE)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/internal/v1/events": {
+      "post": {
+        "operationId": "EventoController_publicar",
+        "summary": "Publicar un evento",
+        "description": "Solo el core, con un token de cliente OAuth (client_credentials) con events:publish. El sobre se valida contra contracts/events/<tipo>.v<mayor>.json; en una transacción se guarda y se crea una entrega por cada suscripción activa del ownerId que escucha el tipo. Idempotente por eventId. Reglas y data por tipo: docs/EVENTOS.md.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SobreEventoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "El eventId ya se había publicado con el mismo contenido: no se duplicó nada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventoAceptadoDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Primera vez: el evento y sus entregas ya están guardados (después del commit)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventoAceptadoDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "El sobre no cumple el esquema de su tipo y versión",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token, no es válido o venció",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El token no trae los scopes requeridos: events:publish",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El eventId ya se había publicado con otro contenido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "eventType o schemaVersion desconocidos",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Más de EVENTS_RATE_LIMIT_MAX publicaciones por minuto desde la misma IP",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No hay claves del servicio de identidad con las que verificar el token (AUTH_UNAVAILABLE)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Eventos internos"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Quinde · Notifier",
+    "description": "Suscripciones a webhooks y entrega firmada de los eventos del sistema de vuelos Quinde. Verifica los tokens RS256 de identity_vuelos por su JWKS.",
+    "version": "0.1.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "Webhooks",
+      "description": "Suscripciones a webhooks del usuario del token, idénticas a /webhooks del contrato GDS Flight Core API 1.5.0.0 (scope flights:webhooks)."
+    },
+    {
+      "name": "Eventos internos",
+      "description": "Por donde el core publica sus eventos (scope events:publish, solo clientes OAuth). Contrato del sobre: contracts/events/ y contracts/asyncapi.yaml."
+    },
+    {
+      "name": "Salud",
+      "description": "Chequeo de vida y de disponibilidad."
+    }
+  ],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "Token de acceso de identity_vuelos: el de una persona (/identity/v1/auth/login) o el de un cliente OAuth (/oauth2/token, client_credentials)"
+      }
+    },
+    "schemas": {
+      "CodigoError": {
+        "type": "string",
+        "enum": [
+          "VALIDATION_FAILED",
+          "RATE_LIMIT_EXCEEDED",
+          "AUTH_UNAVAILABLE"
+        ]
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "https://api.booking-hub.com/errors/validation-failed"
+          },
+          "title": {
+            "type": "string",
+            "example": "Unauthorized"
+          },
+          "status": {
+            "type": "number",
+            "example": 401
+          },
+          "detail": {
+            "type": "string",
+            "example": "Invalid email or password"
+          },
+          "code": {
+            "example": "VALIDATION_FAILED",
+            "$ref": "#/components/schemas/CodigoError"
+          },
+          "invalidParams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ]
+      },
+      "VidaRespuestaDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "UP"
+            ],
+            "description": "El proceso está vivo"
+          },
+          "timestamp": {
+            "type": "string",
+            "example": "2026-10-15T19:00:00.000Z",
+            "description": "Hora del servidor (UTC)"
+          }
+        },
+        "required": [
+          "status",
+          "timestamp"
+        ]
+      },
+      "DisponibilidadRespuestaDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "UP",
+              "DOWN"
+            ],
+            "description": "Estado general del servicio"
+          },
+          "database": {
+            "type": "string",
+            "enum": [
+              "UP",
+              "DOWN"
+            ],
+            "description": "Resultado de SELECT 1 contra PostgreSQL"
+          },
+          "timestamp": {
+            "type": "string",
+            "example": "2026-10-15T19:00:00.000Z",
+            "description": "Hora del servidor (UTC)"
+          }
+        },
+        "required": [
+          "status",
+          "database",
+          "timestamp"
+        ]
+      },
+      "WebhookDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "url": {
+            "type": "string",
+            "example": "https://partner.example.com/hooks/vuelos",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "booking.confirmed",
+                "booking.failed",
+                "booking.changed",
+                "booking.cancelled",
+                "booking.baggage_added",
+                "hold.expired",
+                "flight.schedule_changed",
+                "flight.cancelled",
+                "booking.ticket_issuing",
+                "booking.ticket_issued",
+                "booking.ticket_failed",
+                "booking.checked_in"
+              ]
+            }
+          },
+          "secret": {
+            "type": "string",
+            "example": "****e-largo",
+            "description": "**** y los últimos 4 caracteres"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "events",
+          "secret"
+        ]
+      },
+      "SolicitudWebhookDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "example": "https://partner.example.com/hooks/vuelos",
+            "format": "uri",
+            "description": "https en producción; con NODE_ENV distinto de production también http://localhost. No se aceptan destinos que resuelvan a redes privadas, loopback, link-local o metadata"
+          },
+          "events": {
+            "type": "array",
+            "minItems": 1,
+            "example": [
+              "booking.confirmed",
+              "booking.cancelled"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "booking.confirmed",
+                "booking.failed",
+                "booking.changed",
+                "booking.cancelled",
+                "booking.baggage_added",
+                "hold.expired",
+                "flight.schedule_changed",
+                "flight.cancelled",
+                "booking.ticket_issuing",
+                "booking.ticket_issued",
+                "booking.ticket_failed",
+                "booking.checked_in"
+              ]
+            }
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 16,
+            "example": "un-secreto-compartido-largo",
+            "description": "Con él se firma cada entrega (HMAC-SHA256). Se guarda cifrado y nunca se devuelve: las respuestas traen **** y sus últimos 4 caracteres"
+          }
+        },
+        "required": [
+          "url",
+          "events",
+          "secret"
+        ]
+      },
+      "SobreEventoDto": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id del hecho; la clave de idempotencia"
+          },
+          "eventType": {
+            "type": "string",
+            "enum": [
+              "booking.confirmed",
+              "booking.failed",
+              "booking.changed",
+              "booking.cancelled",
+              "booking.baggage_added",
+              "hold.expired",
+              "flight.schedule_changed",
+              "flight.cancelled",
+              "booking.ticket_issuing",
+              "booking.ticket_issued",
+              "booking.ticket_failed",
+              "booking.checked_in"
+            ],
+            "example": "booking.confirmed"
+          },
+          "schemaVersion": {
+            "type": "string",
+            "example": "1.0",
+            "pattern": "^[1-9][0-9]{0,2}\\.[0-9]{1,3}$",
+            "description": "mayor.menor; el mayor elige contracts/events/<tipo>.v<mayor>.json"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-16T14:30:00.000Z",
+            "description": "Cuándo pasó el hecho, en UTC (sufijo Z)"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Dueño del hecho (sub del token que creó el recurso): solo sus suscripciones lo reciben"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": {
+              "bookingId": "3f0c6a9e-2b1d-4c8e-9a7f-5d4e3c2b1a09",
+              "pnr": "Q7K2MX",
+              "status": "CONFIRMED"
+            },
+            "description": "Lo propio de cada tipo (docs/EVENTOS.md); sin campos de más"
+          }
+        },
+        "required": [
+          "eventId",
+          "eventType",
+          "schemaVersion",
+          "occurredAt",
+          "ownerId",
+          "data"
+        ]
+      },
+      "EventoAceptadoDto": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveries": {
+            "type": "number",
+            "example": 2,
+            "description": "Entregas del evento: una por suscripción activa del dueño que escucha el tipo"
+          },
+          "duplicate": {
+            "type": "boolean",
+            "example": false,
+            "description": "true si el eventId ya se había publicado (200)"
+          }
+        },
+        "required": [
+          "eventId",
+          "deliveries",
+          "duplicate"
+        ]
+      }
+    }
+  }
+}

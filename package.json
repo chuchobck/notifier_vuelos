@@ -23,6 +23,8 @@
     "eventos:breaking": "node dist/cli/eventos-breaking.js",
     "presuscripciones:importar": "nest build",
     "suscripciones:importar": "node dist/cli/importar-suscripciones.js",
+    "preopenapi:export": "nest build",
+    "openapi:export": "node dist/cli/exportar-openapi.js",
     "test": "jest --config test/jest-e2e.json --runInBand",
     "test:e2e": "jest --config test/jest-e2e.json --runInBand",
     "test:mutaciones": "node scripts/mutaciones.mjs"
