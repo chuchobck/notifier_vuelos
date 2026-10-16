@@ -168,6 +168,22 @@ export class VariablesEntorno {
   @IsOptional()
   EVENTS_RATE_LIMIT_MAX?: number;
 
+  /**
+   * Proceso periódico que envía las entregas pendientes (POST firmado a la URL de cada
+   * suscripción) y reintenta las fallidas. Sin valor: true. Con false, los eventos se acumulan en
+   * la bandeja sin enviarse (las pruebas lo apagan).
+   */
+  @IsIn(['true', 'false'], { message: 'NOTIFIER_DELIVERY_JOB_ENABLED debe ser true o false' })
+  @IsOptional()
+  NOTIFIER_DELIVERY_JOB_ENABLED?: string;
+
+  /** Cada cuántos segundos corre ese proceso. Sin valor: 10. */
+  @Max(3600, { message: 'NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS debe estar entre 5 y 3600' })
+  @Min(5, { message: 'NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS debe estar entre 5 y 3600' })
+  @IsInt({ message: 'NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS debe ser un número entero' })
+  @IsOptional()
+  NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS?: number;
+
   /** Duración de la ventana del límite, en segundos. Sin valor: 60. */
   @Max(86_400, { message: 'RATE_LIMIT_WINDOW_SECONDS debe estar entre 1 y 86400' })
   @Min(1, { message: 'RATE_LIMIT_WINDOW_SECONDS debe estar entre 1 y 86400' })
