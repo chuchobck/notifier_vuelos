@@ -132,8 +132,9 @@ function compararPropiedades(antes: Esquema, despues: Esquema, ruta: string): Ca
 
 /**
  * Lo que tiene que cumplir un archivo de contracts/events por sí solo: nombre `<tipo>.v<mayor>.json`,
- * un tipo de los 12 del contrato, `eventType` con ese único valor, versiones `<mayor>.<menor>` de
- * ese mayor, y el sobre completo (los seis campos obligatorios, sin campos de más).
+ * un tipo de los 12 del contrato, un `$id` que termina en ese nombre, `eventType` con ese único
+ * valor, versiones `<mayor>.<menor>` de ese mayor, y el sobre completo (los seis campos
+ * obligatorios, sin campos de más).
  */
 export function problemasDeArchivo(nombre: string, esquema: unknown): string[] {
   const partes = FORMATO_ARCHIVO.exec(nombre);
@@ -144,6 +145,13 @@ export function problemasDeArchivo(nombre: string, esquema: unknown): string[] {
     problemas.push(`${nombre}: ${tipo} no es uno de los 12 tipos de evento del contrato`);
   }
   if (!esObjeto(esquema)) return [...problemas, `${nombre}: no es un objeto JSON`];
+  // Al copiar la v1 para hacer la v2 es fácil olvidarlo, y dos archivos con el mismo $id chocan
+  if (
+    esquema.$id !== undefined &&
+    (typeof esquema.$id !== 'string' || !esquema.$id.endsWith(`/${nombre}`))
+  ) {
+    problemas.push(`${nombre}: el $id debe terminar en /${nombre}`);
+  }
 
   const propiedades = esObjeto(esquema.properties) ? esquema.properties : {};
   const tipoEvento = propiedades.eventType;
