@@ -1,4 +1,5 @@
 import { Routes } from '@nestjs/core';
+import { eventoRoutes } from '../modules/evento/evento.routes';
 import { saludRoutes } from '../modules/salud/salud.routes';
 import { suscripcionRoutes } from '../modules/suscripcion/suscripcion.routes';
 
@@ -8,11 +9,12 @@ import { suscripcionRoutes } from '../modules/suscripcion/suscripcion.routes';
  *
  *   /health, /health/ready        salud (sin versión: la sondea el orquestador)
  *   /flights/v1/webhooks          suscripciones, la misma ruta que en el core (contrato 1.5.0.0)
+ *   /internal/v1/events           publicación de eventos (solo el core)
  */
-export const rutas: Routes = [...saludRoutes, ...suscripcionRoutes];
+export const rutas: Routes = [...saludRoutes, ...suscripcionRoutes, ...eventoRoutes];
 
 /**
  * Rutas cuyas respuestas no se guardan en ninguna caché: llevan la URL de un tercero o son de
  * la API interna.
  */
-export const RUTAS_SIN_CACHE: string[] = ['/flights/v1/webhooks'];
+export const RUTAS_SIN_CACHE: string[] = ['/flights/v1/webhooks', '/internal/'];

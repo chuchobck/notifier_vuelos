@@ -5,6 +5,7 @@ import { CommonModule } from './common/common.module';
 import { validarEntorno } from './config/entorno';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { AutenticacionModule } from './modules/auth/autenticacion.module';
+import { EventoModule } from './modules/evento/evento.module';
 import { SaludModule } from './modules/salud/salud.module';
 import { SuscripcionModule } from './modules/suscripcion/suscripcion.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -27,6 +28,7 @@ import { rutas } from './routes/index.routes';
     SaludModule,
     AuditoriaModule,
     SuscripcionModule,
+    EventoModule,
 
     // Tabla de rutas: src/routes/index.routes.ts
     RouterModule.register(rutas),

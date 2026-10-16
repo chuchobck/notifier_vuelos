@@ -158,6 +158,16 @@ export class VariablesEntorno {
   @IsOptional()
   RATE_LIMIT_MAX?: number;
 
+  /**
+   * Publicaciones por minuto e IP en POST /internal/v1/events, que no cuenta en el límite global
+   * (el core publica en ráfagas). Sin valor: 1200.
+   */
+  @Max(100_000, { message: 'EVENTS_RATE_LIMIT_MAX debe estar entre 1 y 100000' })
+  @Min(1, { message: 'EVENTS_RATE_LIMIT_MAX debe estar entre 1 y 100000' })
+  @IsInt({ message: 'EVENTS_RATE_LIMIT_MAX debe ser un número entero' })
+  @IsOptional()
+  EVENTS_RATE_LIMIT_MAX?: number;
+
   /** Duración de la ventana del límite, en segundos. Sin valor: 60. */
   @Max(86_400, { message: 'RATE_LIMIT_WINDOW_SECONDS debe estar entre 1 y 86400' })
   @Min(1, { message: 'RATE_LIMIT_WINDOW_SECONDS debe estar entre 1 y 86400' })

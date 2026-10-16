@@ -2,6 +2,7 @@ import { SetMetadata, applyDecorators } from '@nestjs/common';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 
 export const ES_LIMITE_ESTRICTO = 'esLimiteEstricto';
+export const ES_LIMITE_EVENTOS = 'esLimiteEventos';
 
 /**
  * Límite propio para una ruta (o un controller), más bajo que el global. Cuenta por IP y por
@@ -21,6 +22,15 @@ export function LimiteEstricto(limite: number, ventanaSegundos: number) {
     Throttle({ estricto: { limit: limite, ttl: ventanaSegundos * 1000 } }),
   );
 }
+
+/**
+ * La ruta (POST /internal/v1/events) no cuenta en el límite global por IP sino en uno propio,
+ * más alto (EVENTS_RATE_LIMIT_MAX por minuto e IP): el core publica en ráfagas desde pocas IP
+ * (la cancelación de un vuelo es un evento por reserva) y el límite pensado para clientes de la
+ * API pública lo cortaría.
+ */
+export const LimiteEventos = () =>
+  applyDecorators(SetMetadata(ES_LIMITE_EVENTOS, true), SkipThrottle({ default: true }));
 
 /** Excluye una ruta del límite de peticiones (los chequeos de salud del orquestador). */
 export const SinLimiteDePeticiones = () => SkipThrottle({ default: true, estricto: true });
