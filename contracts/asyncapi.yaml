@@ -1,0 +1,299 @@
+# Contrato de eventos de Quinde · Notifier (AsyncAPI 3.0).
+#
+# Describe los dos canales del servicio:
+#   - eventos: el core publica cada hecho con POST /internal/v1/events (el sobre versionado de
+#     contracts/events/<tipo>.v<mayor>.json), con un token de cliente OAuth con events:publish.
+#   - webhook: el notifier entrega el WebhookPayload del contrato GDS Flight Core API 1.5.0.0 a la
+#     URL de cada suscripción, firmado con HMAC-SHA256 (X-Webhook-Signature).
+# Las reglas de versionado y compatibilidad están en docs/EVENTOS.md. El CI lo valida con el CLI
+# de AsyncAPI.
+asyncapi: 3.0.0
+info:
+  title: Quinde · Eventos de vuelos
+  version: 1.0.0
+  description: |
+    Eventos del sistema de vuelos Quinde. El core (backend_vuelos) publica cada hecho de negocio en
+    Quinde · Notifier, que lo guarda una sola vez por eventId y lo entrega a las suscripciones
+    activas del dueño (ownerId) que escuchan ese tipo, con reintentos (1, 5, 30 y 120 minutos; 5
+    intentos). La entrega es al menos una vez: el receptor descarta duplicados por X-Webhook-Id.
+servers:
+  notifier:
+    host: notifier.quinde.example
+    protocol: https
+    pathname: /internal/v1
+    description: Quinde · Notifier (API interna; solo la usa el core).
+    security:
+      - $ref: '#/components/securitySchemes/clienteOAuth'
+channels:
+  eventos:
+    address: /events
+    title: Publicación de eventos del core
+    description: |
+      POST /internal/v1/events con el sobre { eventId, eventType, schemaVersion, occurredAt, ownerId,
+      data }. 202 la primera vez (guardado y repartido, después del commit), 200 si el eventId ya
+      existía con el mismo contenido, 409 si existía con otro, 422 con un eventType o un
+      schemaVersion desconocidos y 400 si no cumple el esquema.
+    servers:
+      - $ref: '#/servers/notifier'
+    messages:
+      bookingConfirmed:
+        $ref: '#/components/messages/bookingConfirmed'
+      bookingFailed:
+        $ref: '#/components/messages/bookingFailed'
+      bookingChanged:
+        $ref: '#/components/messages/bookingChanged'
+      bookingCancelled:
+        $ref: '#/components/messages/bookingCancelled'
+      bookingBaggageAdded:
+        $ref: '#/components/messages/bookingBaggageAdded'
+      holdExpired:
+        $ref: '#/components/messages/holdExpired'
+      flightScheduleChanged:
+        $ref: '#/components/messages/flightScheduleChanged'
+      flightCancelled:
+        $ref: '#/components/messages/flightCancelled'
+      bookingTicketIssuing:
+        $ref: '#/components/messages/bookingTicketIssuing'
+      bookingTicketIssued:
+        $ref: '#/components/messages/bookingTicketIssued'
+      bookingTicketFailed:
+        $ref: '#/components/messages/bookingTicketFailed'
+      bookingCheckedIn:
+        $ref: '#/components/messages/bookingCheckedIn'
+  webhook:
+    address: null
+    title: Entrega a un suscriptor
+    description: |
+      POST a la URL de cada suscripción (registrada con POST /flights/v1/webhooks; la URL la elige el
+      tercero, por eso la dirección no es fija). Un 2xx cierra la entrega; cualquier otra cosa, un
+      error de red o 5 s sin respuesta se reintenta. No se siguen redirecciones.
+    messages:
+      webhookPayload:
+        $ref: '#/components/messages/webhookPayload'
+operations:
+  recibirEvento:
+    action: receive
+    title: El notifier recibe un evento del core
+    channel:
+      $ref: '#/channels/eventos'
+    security:
+      - $ref: '#/components/securitySchemes/clienteOAuth'
+    bindings:
+      http:
+        method: POST
+        bindingVersion: 0.3.0
+    messages:
+      - $ref: '#/channels/eventos/messages/bookingConfirmed'
+      - $ref: '#/channels/eventos/messages/bookingFailed'
+      - $ref: '#/channels/eventos/messages/bookingChanged'
+      - $ref: '#/channels/eventos/messages/bookingCancelled'
+      - $ref: '#/channels/eventos/messages/bookingBaggageAdded'
+      - $ref: '#/channels/eventos/messages/holdExpired'
+      - $ref: '#/channels/eventos/messages/flightScheduleChanged'
+      - $ref: '#/channels/eventos/messages/flightCancelled'
+      - $ref: '#/channels/eventos/messages/bookingTicketIssuing'
+      - $ref: '#/channels/eventos/messages/bookingTicketIssued'
+      - $ref: '#/channels/eventos/messages/bookingTicketFailed'
+      - $ref: '#/channels/eventos/messages/bookingCheckedIn'
+  enviarWebhook:
+    action: send
+    title: El notifier entrega el evento a un suscriptor
+    channel:
+      $ref: '#/channels/webhook'
+    bindings:
+      http:
+        method: POST
+        bindingVersion: 0.3.0
+    messages:
+      - $ref: '#/channels/webhook/messages/webhookPayload'
+components:
+  securitySchemes:
+    clienteOAuth:
+      type: oauth2
+      description: |
+        Token RS256 de identity_vuelos para un cliente OAuth (client_credentials) con el scope
+        events:publish. El token de una persona no puede publicar, aunque traiga el scope.
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.quinde.example/oauth2/token
+          availableScopes:
+            events:publish: Publicar eventos en el notifier
+      scopes:
+        - events:publish
+  messages:
+    bookingConfirmed:
+      name: booking.confirmed
+      title: booking.confirmed (v1)
+      summary: 'La reserva quedó confirmada: boletos emitidos.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.confirmed.v1.json'
+    bookingFailed:
+      name: booking.failed
+      title: booking.failed (v1)
+      summary: 'La reserva falló (pago rechazado o PNR que no se pudo crear).'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.failed.v1.json'
+    bookingChanged:
+      name: booking.changed
+      title: booking.changed (v1)
+      summary: 'Se confirmó un cambio de fecha de la reserva.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.changed.v1.json'
+    bookingCancelled:
+      name: booking.cancelled
+      title: booking.cancelled (v1)
+      summary: 'La reserva quedó cancelada. Si hubo reembolso, lleva su monto.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.cancelled.v1.json'
+    bookingBaggageAdded:
+      name: booking.baggage_added
+      title: booking.baggage_added (v1)
+      summary: 'Se agregó equipaje a la reserva.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.baggage_added.v1.json'
+    holdExpired:
+      name: hold.expired
+      title: hold.expired (v1)
+      summary: 'Venció un hold (retención de cupo) sin convertirse en reserva.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/hold.expired.v1.json'
+    flightScheduleChanged:
+      name: flight.schedule_changed
+      title: flight.schedule_changed (v1)
+      summary: 'Cambió el horario (programado o estimado) de una salida, o se retrasó. Un evento por cada reserva viva en esa salida.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/flight.schedule_changed.v1.json'
+    flightCancelled:
+      name: flight.cancelled
+      title: flight.cancelled (v1)
+      summary: 'Se canceló una salida. Un evento por cada reserva viva en esa salida.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/flight.cancelled.v1.json'
+    bookingTicketIssuing:
+      name: booking.ticket_issuing
+      title: booking.ticket_issuing (v1)
+      summary: 'Empezó la emisión de los boletos de la reserva.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.ticket_issuing.v1.json'
+    bookingTicketIssued:
+      name: booking.ticket_issued
+      title: booking.ticket_issued (v1)
+      summary: 'Se emitieron los boletos de la reserva.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.ticket_issued.v1.json'
+    bookingTicketFailed:
+      name: booking.ticket_failed
+      title: booking.ticket_failed (v1)
+      summary: 'Falló la emisión de los boletos de la reserva.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.ticket_failed.v1.json'
+    bookingCheckedIn:
+      name: booking.checked_in
+      title: booking.checked_in (v1)
+      summary: 'Un pasajero de la reserva hizo check-in.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.checked_in.v1.json'
+    webhookPayload:
+      name: WebhookPayload
+      title: WebhookPayload del contrato GDS Flight Core API 1.5.0.0
+      summary: 'Lo que recibe el tercero. El data es el mismo del sobre que publicó el core.'
+      contentType: application/json
+      headers:
+        type: object
+        required:
+          - X-Webhook-Event
+          - X-Webhook-Id
+          - X-Webhook-Timestamp
+          - X-Webhook-Signature
+        properties:
+          X-Webhook-Event:
+            type: string
+            description: El eventType.
+          X-Webhook-Id:
+            type: string
+            format: uuid
+            description: El eventId. El mismo en cada reintento; sirve para descartar duplicados.
+          X-Webhook-Timestamp:
+            type: string
+            pattern: '^[0-9]+$'
+            description: Segundos desde 1970 (UTC) del intento.
+          X-Webhook-Signature:
+            type: string
+            pattern: '^sha256=[0-9a-f]{64}$'
+            description: sha256= y el HMAC-SHA256 en hexadecimal de "<X-Webhook-Timestamp>.<cuerpo>" con el secreto de la suscripción.
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - eventId
+          - eventType
+          - occurredAt
+          - apiVersion
+          - data
+        properties:
+          eventId:
+            type: string
+            format: uuid
+          eventType:
+            type: string
+            enum:
+              - booking.confirmed
+              - booking.failed
+              - booking.changed
+              - booking.cancelled
+              - booking.baggage_added
+              - hold.expired
+              - flight.schedule_changed
+              - flight.cancelled
+              - booking.ticket_issuing
+              - booking.ticket_issued
+              - booking.ticket_failed
+              - booking.checked_in
+          occurredAt:
+            type: string
+            format: date-time
+            description: UTC, con milisegundos (2026-10-16T14:30:00.000Z).
+          apiVersion:
+            type: string
+            enum:
+              - 1.5.0
+            description: info.version del contrato del core sin el cuarto número.
+          data:
+            type: object
+            description: El data del sobre, tal como lo validó el esquema de su tipo.
