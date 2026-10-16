@@ -1,8 +1,31 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { RouterModule } from '@nestjs/core';
+import { CommonModule } from './common/common.module';
+import { validarEntorno } from './config/entorno';
+import { AutenticacionModule } from './modules/auth/autenticacion.module';
+import { SaludModule } from './modules/salud/salud.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { rutas } from './routes/index.routes';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }), PrismaModule],
+  imports: [
+    // Carga las variables de entorno y las valida; si falta una, el servicio no levanta
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+      validate: validarEntorno,
+    }),
+
+    // CommonModule va primero: el límite de peticiones es el primer guard global, antes que
+    // los de AutenticacionModule (token y scopes).
+    PrismaModule,
+    CommonModule,
+    AutenticacionModule,
+    SaludModule,
+
+    // Tabla de rutas: src/routes/index.routes.ts
+    RouterModule.register(rutas),
+  ],
 })
 export class AppModule {}
