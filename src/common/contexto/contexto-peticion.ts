@@ -20,6 +20,11 @@ export interface ContextoPeticion {
    * auditoría ya lo identifica; esto es su código legible, que va a la línea de acceso.
    */
   cliente?: string;
+  /**
+   * El span SERVER de la petición (lo pone el middleware de observabilidad), para las líneas que se
+   * escriben fuera del contexto de OpenTelemetry (la de acceso, al terminar la respuesta).
+   */
+  traza?: { traceId: string; spanId: string };
 }
 
 const almacen = new AsyncLocalStorage<ContextoPeticion>();

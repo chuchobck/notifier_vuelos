@@ -84,6 +84,21 @@ export class EntregaRepository {
   }
 
   /**
+   * Cuántas entregas están PENDIENTE y desde cuándo espera la más vieja (null si no hay ninguna),
+   * para los gauges de /metrics. Una consulta sobre el índice parcial de PENDIENTE, con un plazo
+   * en la base (`statement_timeout` de esta transacción): si tarda más, falla en vez de colgar.
+   */
+  async resumenPendientes(plazoMs: number): Promise<{ pendientes: number; desde: Date | null }> {
+    const [, filas] = await this.prisma.db.$transaction([
+      this.prisma.db.$executeRaw`SELECT set_config('statement_timeout', ${String(plazoMs)}, true)`,
+      this.prisma.db.$queryRaw<Array<{ n: number; desde: Date | null }>>`
+        SELECT count(*)::int AS n, min(fecha_creacion) AS desde
+          FROM notificaciones.entrega WHERE estado = 'PENDIENTE'`,
+    ]);
+    return { pendientes: filas[0]?.n ?? 0, desde: filas[0]?.desde ?? null };
+  }
+
+  /**
    * Si las últimas `maximo` entregas ya resueltas de la suscripción (ENTREGADO o FALLIDO) son
    * todas FALLIDO, la da de baja (lógica) y lo audita sin actor (proceso interno), en la misma
    * transacción. Una entrega ENTREGADO corta la racha. Devuelve si la dio de baja.

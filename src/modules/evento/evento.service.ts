@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { CODIGO_SIN_EQUIVALENTE } from '../../common/errores/codigo-error';
 import { ErrorNegocio } from '../../common/errores/error-negocio';
 import { Reloj } from '../../common/reloj';
+import { Observabilidad } from '../../observabilidad/observabilidad';
 import { PrismaService } from '../../prisma/prisma.service';
 import { canonico } from './contrato/compatibilidad';
 import { RegistroEsquemas } from './contrato/registro-esquemas';
@@ -29,6 +30,7 @@ export class PublicacionEventos {
     private readonly repositorio: EventoRepository,
     private readonly prisma: PrismaService,
     private readonly reloj: Reloj,
+    private readonly observabilidad: Observabilidad,
   ) {}
 
   async publicar(cuerpo: unknown, publicadoPor: string): Promise<ResultadoPublicacion> {
@@ -75,6 +77,9 @@ export class PublicacionEventos {
       return { eventId: sobre.eventId, entregas, duplicado: false };
     });
 
+    this.observabilidad.notifier.eventosRecibidos.inc({
+      result: resultado.duplicado ? 'duplicate' : 'accepted',
+    });
     // Ni el dueño ni el data: el eventId y el tipo bastan para seguir el evento
     this.logger.log(
       `Evento ${resultado.eventId} (${sobre.eventType} ${sobre.schemaVersion}) ` +

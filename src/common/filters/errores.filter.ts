@@ -6,6 +6,7 @@ import { contextoDeLaPeticion } from '../contexto/contexto.middleware';
 import { ErrorNegocio } from '../errores/error-negocio';
 import { CONTENT_TYPE_PROBLEMA } from '../errores/problem-details';
 import { traducirExcepcion } from '../errores/traducir-excepcion';
+import { plantillaDeRuta, SIN_PLANTILLA } from '../../observabilidad/plantilla-ruta';
 
 /** Forma mínima de la capa de ruta de Express, que no tiene tipos públicos. */
 interface CapaExpress {
@@ -30,6 +31,8 @@ export class ErroresFilter implements ExceptionFilter {
     const peticion = host.switchToHttp().getRequest<Request>();
     const respuesta = host.switchToHttp().getResponse<Response>();
     const ruta = peticion.originalUrl.split('?')[0].slice(0, 200);
+    // Al log va la plantilla, como en la línea de acceso: ni ids ni nada que venga en la URL
+    const plantilla = plantillaDeRuta(peticion) ?? SIN_PLANTILLA;
 
     // Un error del parser del cuerpo llega antes de abrir el contexto asíncrono: el id se toma
     // de la petición para que su línea de log lo lleve igual.
@@ -48,14 +51,14 @@ export class ErroresFilter implements ExceptionFilter {
     registrar(() => {
       if (esErrorInterno) {
         this.logger.error(
-          `${peticion.method} ${ruta} → ${problema.status}`,
+          `${peticion.method} ${plantilla} → ${problema.status}`,
           describirParaLog(causa),
         );
       } else {
         const origen =
           causa instanceof Error && !(causa instanceof ErrorNegocio) ? ` (${resumir(causa)})` : '';
         this.logger.debug(
-          `${peticion.method} ${ruta} → ${problema.status} ${problema.code}${origen}`,
+          `${peticion.method} ${plantilla} → ${problema.status} ${problema.code}${origen}`,
         );
       }
     });

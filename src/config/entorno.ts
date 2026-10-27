@@ -16,6 +16,7 @@ import {
   validateSync,
 } from 'class-validator';
 import { esOrigenEmisor, esUrlJwks } from './autenticacion';
+import { esUrlOtlp } from './observabilidad';
 import { esOrigenValido, listarOrigenes } from './origenes-cors';
 import { parsearTrustProxy } from './proxy';
 
@@ -75,6 +76,30 @@ class UrlJwks implements ValidatorConstraintInterface {
 
   defaultMessage(): string {
     return 'JWKS_URL debe ser una URL https (http solo fuera de producción) sin usuario, clave ni fragmento';
+  }
+}
+
+/** OTEL_EXPORTER_OTLP_ENDPOINT: URL http(s) sin usuario, clave, query ni fragmento. */
+@ValidatorConstraint({ name: 'urlOtlp' })
+class UrlOtlp implements ValidatorConstraintInterface {
+  validate(valor: unknown): boolean {
+    return esUrlOtlp(valor);
+  }
+
+  defaultMessage(): string {
+    return 'OTEL_EXPORTER_OTLP_ENDPOINT debe ser una URL http(s) sin usuario, clave, query ni fragmento';
+  }
+}
+
+/** METRICS_PORT: distinto de PORT (el ingress solo expone PORT); 0 lo apaga. */
+@ValidatorConstraint({ name: 'puertoMetricas' })
+class PuertoMetricas implements ValidatorConstraintInterface {
+  validate(valor: unknown, { object }: ValidationArguments): boolean {
+    return valor === 0 || valor !== (object as VariablesEntorno).PORT;
+  }
+
+  defaultMessage(): string {
+    return 'METRICS_PORT debe ser distinto de PORT (el ingress solo expone PORT)';
   }
 }
 
@@ -183,6 +208,41 @@ export class VariablesEntorno {
   @IsInt({ message: 'NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS debe ser un número entero' })
   @IsOptional()
   NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS?: number;
+
+  /** `service.name` de las trazas y las métricas. Sin valor: quinde-notifier. */
+  @Matches(/^[a-z][a-z0-9-]{0,62}$/, {
+    message: 'OTEL_SERVICE_NAME debe ser un nombre en minúsculas, dígitos y guiones',
+  })
+  @IsOptional()
+  OTEL_SERVICE_NAME?: string;
+
+  /** Base OTLP/HTTP del recolector (http://jaeger:4318). Sin valor: las trazas no se exportan. */
+  @Validate(UrlOtlp)
+  @IsOptional()
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+
+  /** Fracción de trazas raíz que se registran (0 a 1). Sin valor: 1.0 en desarrollo y 0.1 en producción. */
+  @Matches(/^(0(\.\d+)?|1(\.0+)?)$/, {
+    message: 'OTEL_TRACES_SAMPLER_ARG debe ser una fracción entre 0 y 1',
+  })
+  @IsOptional()
+  OTEL_TRACES_SAMPLER_ARG?: string;
+
+  /**
+   * Continuar el traceparent entrante. Sin valor: true (el notifier es interno: lo alcanzan el
+   * gateway y el relevo del core).
+   */
+  @IsIn(['true', 'false'], { message: 'TRACE_TRUST_INCOMING debe ser true o false' })
+  @IsOptional()
+  TRACE_TRUST_INCOMING?: string;
+
+  /** Puerto aparte de /metrics; 0 lo apaga. Sin valor: 9464 (en local, 9468). */
+  @Validate(PuertoMetricas)
+  @Max(65535, { message: 'METRICS_PORT debe estar entre 0 y 65535' })
+  @Min(0, { message: 'METRICS_PORT debe estar entre 0 y 65535' })
+  @IsInt({ message: 'METRICS_PORT debe ser un número entero' })
+  @IsOptional()
+  METRICS_PORT?: number;
 
   /** Duración de la ventana del límite, en segundos. Sin valor: 60. */
   @Max(86_400, { message: 'RATE_LIMIT_WINDOW_SECONDS debe estar entre 1 y 86400' })

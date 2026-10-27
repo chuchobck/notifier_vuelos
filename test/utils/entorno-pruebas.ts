@@ -28,3 +28,9 @@ delete process.env.RATE_LIMIT_MAX;
 delete process.env.RATE_LIMIT_WINDOW_SECONDS;
 delete process.env.EVENTS_RATE_LIMIT_MAX;
 delete process.env.NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS;
+// Sin servidor de /metrics (cada prueba lee el Registry de su app) ni exportador de trazas
+process.env.METRICS_PORT = '0';
+delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+delete process.env.OTEL_TRACES_SAMPLER_ARG;
+delete process.env.OTEL_SERVICE_NAME;
+delete process.env.TRACE_TRUST_INCOMING;
