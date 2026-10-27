@@ -11,5 +11,6 @@ import { SuscripcionService } from './suscripcion.service';
 @Module({
   controllers: [SuscripcionController],
   providers: [SuscripcionService, SuscripcionRepository, CifradoSecreto],
+  exports: [SuscripcionService],
 })
 export class SuscripcionModule {}

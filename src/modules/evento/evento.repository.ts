@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TransaccionNotificaciones } from '../../prisma/prisma.service';
-import { WebhookPayload } from './evento.modelo';
+import { CloudEvent } from './traductores/cloudevent.v2';
+import { WebhookPayload } from './traductores/webhook-payload.v1';
 
 export interface EventoNuevo {
   eventId: string;
@@ -59,8 +60,9 @@ export class EventoRepository {
 
   /**
    * Una entrega PENDIENTE por cada suscripción ACTIVA del dueño que escucha el tipo, con el
-   * cuerpo ya congelado, en un solo INSERT ... SELECT (como el core). Si el dueño no tiene
-   * suscriptores, no inserta nada. Devuelve cuántas creó.
+   * cuerpo ya congelado en el formato de esa suscripción (el WebhookPayload v1 o el CloudEvent
+   * v2), en un solo INSERT ... SELECT (como el core). Si el dueño no tiene suscriptores, no
+   * inserta nada. Devuelve cuántas creó.
    */
   async repartir(
     tx: TransaccionNotificaciones,
@@ -68,14 +70,16 @@ export class EventoRepository {
       eventId: string;
       tipo: string;
       idPropietario: string;
-      cuerpo: WebhookPayload;
+      cuerpos: { v1: WebhookPayload; v2: CloudEvent };
       ahora: Date;
     },
   ): Promise<number> {
     return tx.$executeRaw`
       INSERT INTO notificaciones.entrega
              (suscripcion_id, id_evento, cuerpo, proximo_intento, fecha_creacion, fecha_actualizacion)
-      SELECT s.id, ${reparto.eventId}::uuid, ${JSON.stringify(reparto.cuerpo)}::jsonb,
+      SELECT s.id, ${reparto.eventId}::uuid,
+             (CASE s.formato WHEN 'v2' THEN ${JSON.stringify(reparto.cuerpos.v2)}::jsonb
+                             ELSE ${JSON.stringify(reparto.cuerpos.v1)}::jsonb END),
              ${reparto.ahora}::timestamptz, ${reparto.ahora}::timestamptz, ${reparto.ahora}::timestamptz
         FROM notificaciones.suscripcion s
         JOIN notificaciones.suscripcion_evento se

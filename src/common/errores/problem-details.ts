@@ -48,6 +48,6 @@ export function tituloDeStatus(status: number): string {
 }
 
 /** `RATE_LIMIT_EXCEEDED` → `https://api.booking-hub.com/errors/rate-limit-exceeded`. */
-export function tipoDeCodigo(codigo: CodigoError): string {
+export function tipoDeCodigo(codigo: string): string {
   return TIPO_ERROR_BASE + codigo.toLowerCase().replace(/_/g, '-');
 }

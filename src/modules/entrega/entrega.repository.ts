@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaSuscripciones } from '../auditoria/auditoria.service';
-import { EVENTOS_WEBHOOK } from '../compartido/eventos-webhook';
+import { enOrdenDelFormato } from '../compartido/eventos-webhook';
+import { FormatoEntrega } from '../evento/traductores/evento-interno';
 
 /**
  * La bandeja de salida (entrega): tomar las pendientes, anotar cada intento y dar de baja la
@@ -46,7 +47,9 @@ export class EntregaRepository {
       )
       SELECT r.id AS "id", r.suscripcion_id AS "suscripcionId", r.id_evento AS "eventId",
              ev.tipo AS "tipo", r.intentos::int AS "intentos", r.cuerpo AS "cuerpo",
-             s.url AS "url", s.secreto_cifrado AS "secretoCifrado", s.activo AS "suscripcionActiva"
+             s.url AS "url", s.secreto_cifrado AS "secretoCifrado", s.activo AS "suscripcionActiva",
+             s.formato AS "formato", ev.correlation_id AS "correlationId",
+             ev.traceparent AS "traceparent"
         FROM reclamadas r
         JOIN notificaciones.suscripcion s ON s.id = r.suscripcion_id
         JOIN notificaciones.evento ev     ON ev.id_evento = r.id_evento
@@ -119,6 +122,7 @@ export class EntregaRepository {
         select: {
           id_propietario: true,
           url: true,
+          formato: true,
           suscripcion_evento: { select: { tipo_evento: true } },
         },
       });
@@ -136,7 +140,7 @@ export class EntregaRepository {
           suscripcionId,
           idPropietario: suscripcion.id_propietario,
           url: suscripcion.url,
-          eventos: EVENTOS_WEBHOOK.filter((tipo) => tipos.includes(tipo)),
+          eventos: enOrdenDelFormato(tipos, suscripcion.formato === 'v2' ? 'v2' : 'v1'),
           motivo: 'FALLIDAS_SEGUIDAS',
         },
         ahora,
@@ -160,4 +164,10 @@ export interface EntregaReclamada {
   url: string;
   secretoCifrado: string;
   suscripcionActiva: boolean;
+  /** El de la suscripción: decide las cabeceras, la firma y los reintentos. */
+  formato: FormatoEntrega;
+  /** X-Correlation-Id del evento: va en la cabecera y en cada línea de log del intento. */
+  correlationId: string;
+  /** traceparent del span que recibió el evento: el span CLIENT del intento cuelga de él. */
+  traceparent: string | null;
 }

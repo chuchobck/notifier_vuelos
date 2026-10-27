@@ -7,15 +7,28 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaSuscripciones } from '../auditoria/auditoria.service';
 import { CifradoSecreto } from '../compartido/cifrado-secreto';
 import { motivoDestinoInvalido } from '../compartido/destino-permitido';
-import { enmascarar, porOrdenDelContrato } from '../compartido/eventos-webhook';
-import { SolicitudWebhookDto } from './dto/webhook.dto';
-import { MAXIMO_SUSCRIPCIONES_ACTIVAS, SuscripcionVista } from './suscripcion.modelo';
+import { enmascarar, enOrdenDelFormato, TipoEvento } from '../compartido/eventos-webhook';
+import {
+  FormatoEntrega,
+  MAXIMO_SUSCRIPCIONES_ACTIVAS,
+  SuscripcionVista,
+} from './suscripcion.modelo';
+
+/** Lo que piden las dos API al registrar (WebhookSubscription de cada contrato). */
+export interface SolicitudSuscripcion {
+  url: string;
+  events: readonly TipoEvento[];
+  secret: string;
+}
 import { SuscripcionRepository } from './suscripcion.repository';
 
 /**
- * Suscripciones a webhooks del usuario del token (GET, POST y DELETE /webhooks), con las mismas
- * reglas del core: todo es del dueño (una suscripción ajena es 404), a lo sumo 10 activas, una
- * URL activa no se repite, y el destino se valida contra SSRF. Alta y baja van en una
+ * Suscripciones a webhooks del usuario del token (GET, POST y DELETE de /flights/v1/webhooks y de
+ * /api/v2/vuelos/webhooks), con las mismas reglas del core: todo es del dueño (una suscripción
+ * ajena es 404), a lo sumo 10 activas (sumando las dos API), una URL activa no se repite (tampoco
+ * entre las dos API), y el destino se valida contra SSRF. Cada suscripción guarda su formato: el
+ * de la API por la que se creó (v1 recibe el WebhookPayload; v2, CloudEvents), y cada API lista y
+ * da de baja solo las suyas. Alta y baja van en una
  * transacción con su registro de auditoría (sin el secreto ni la URL completa).
  */
 @Injectable()
@@ -37,7 +50,11 @@ export class SuscripcionService {
    * Registra la suscripción. 400 si la URL no es un destino válido (https en producción, y que
    * no resuelva a una red interna); 409 si el usuario ya tiene 10 activas o ya tiene esa URL.
    */
-  async crear(solicitud: SolicitudWebhookDto, idPropietario: string): Promise<SuscripcionVista> {
+  async crear(
+    solicitud: SolicitudSuscripcion,
+    idPropietario: string,
+    formato: FormatoEntrega = 'v1',
+  ): Promise<SuscripcionVista> {
     const motivo = await motivoDestinoInvalido(solicitud.url, { produccion: this.produccion });
     // La URL no se repite en el error: puede llevar un token en la consulta
     if (motivo !== null) {
@@ -46,9 +63,9 @@ export class SuscripcionService {
       });
     }
 
-    const eventos = [...solicitud.events].sort(porOrdenDelContrato);
+    const eventos = enOrdenDelFormato(solicitud.events, formato);
     const ahora = this.reloj.ahora();
-    const id = await this.prisma.transaccion(async (tx) => {
+    const creada = await this.prisma.transaccion(async (tx) => {
       if (
         (await this.repositorio.contarActivasBloqueando(tx, idPropietario)) >=
         MAXIMO_SUSCRIPCIONES_ACTIVAS
@@ -74,13 +91,14 @@ export class SuscripcionService {
         url: solicitud.url,
         secretoCifrado: this.cifrado.cifrar(solicitud.secret),
         eventos,
+        formato,
         fecha: ahora,
       });
       await this.auditoria.registrar(
         tx,
         {
           accion: 'SUSCRIPCION_CREADA',
-          suscripcionId: creada,
+          suscripcionId: creada.id,
           idPropietario,
           url: solicitud.url,
           eventos,
@@ -89,24 +107,31 @@ export class SuscripcionService {
       );
       return creada;
     });
-    return { id, url: solicitud.url, eventos, secretoEnmascarado: enmascarar(solicitud.secret) };
+    return {
+      id: creada.id,
+      url: solicitud.url,
+      eventos,
+      secretoEnmascarado: enmascarar(solicitud.secret),
+      fechaCreacion: creada.fechaCreacion,
+    };
   }
 
-  async listar(idPropietario: string): Promise<SuscripcionVista[]> {
-    const suscripciones = await this.repositorio.activasDe(idPropietario);
+  async listar(idPropietario: string, formato: FormatoEntrega = 'v1'): Promise<SuscripcionVista[]> {
+    const suscripciones = await this.repositorio.activasDe(idPropietario, formato);
     return suscripciones.map((s) => ({
       id: s.id,
       url: s.url,
       eventos: s.eventos,
       secretoEnmascarado: this.enmascarado(s.secretoCifrado),
+      fechaCreacion: s.fechaCreacion,
     }));
   }
 
-  /** Baja lógica: 404 si no existe, no está activa o es de otro usuario. */
-  async eliminar(id: string, idPropietario: string): Promise<void> {
+  /** Baja lógica: 404 si no existe, no está activa, es de otro usuario o de la otra API. */
+  async eliminar(id: string, idPropietario: string, formato: FormatoEntrega = 'v1'): Promise<void> {
     const ahora = this.reloj.ahora();
     const existia = await this.prisma.transaccion(async (tx) => {
-      const baja = await this.repositorio.desactivar(tx, id, idPropietario, ahora);
+      const baja = await this.repositorio.desactivar(tx, id, idPropietario, ahora, formato);
       if (baja === null) return false;
       await this.auditoria.registrar(
         tx,

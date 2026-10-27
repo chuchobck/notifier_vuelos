@@ -65,6 +65,15 @@ export const porOrdenDelContrato = (a: EventoWebhook, b: EventoWebhook): number 
 export const porOrdenV2 = (a: TipoEvento, b: TipoEvento): number =>
   EVENTOS.indexOf(a) - EVENTOS.indexOf(b);
 
+/**
+ * Los tipos guardados de una suscripción, en el orden del contrato de su formato (la base no
+ * garantiza un orden): el de 1.5 en una v1, el de VuelosEventName en una v2.
+ */
+export function enOrdenDelFormato(tipos: readonly string[], formato: 'v1' | 'v2'): TipoEvento[] {
+  const orden: readonly TipoEvento[] = formato === 'v2' ? EVENTOS : EVENTOS_WEBHOOK;
+  return orden.filter((tipo) => tipos.includes(tipo));
+}
+
 /** `****` y los últimos 4 caracteres del secreto, como lo devuelve el core. */
 export function enmascarar(secreto: string): string {
   return `****${secreto.slice(-4)}`;

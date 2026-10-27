@@ -1,4 +1,7 @@
-import { EventoWebhook } from '../compartido/eventos-webhook';
+import { TipoEvento } from '../compartido/eventos-webhook';
+import { FormatoEntrega } from '../evento/traductores/evento-interno';
+
+export type { FormatoEntrega };
 
 /** Máximo de suscripciones activas por usuario (el mismo del core). */
 export const MAXIMO_SUSCRIPCIONES_ACTIVAS = 10;
@@ -10,7 +13,8 @@ export const LIMITE_ALTA_WEBHOOK = { limite: 10, ventanaSegundos: 60 };
 export interface Suscripcion {
   id: string;
   url: string;
-  eventos: EventoWebhook[];
+  eventos: TipoEvento[];
+  fechaCreacion: Date;
   /** El secreto cifrado (`v1.…`), tal como está en la base. */
   secretoCifrado: string;
 }
@@ -19,6 +23,7 @@ export interface Suscripcion {
 export interface SuscripcionVista {
   id: string;
   url: string;
-  eventos: EventoWebhook[];
+  eventos: TipoEvento[];
   secretoEnmascarado: string;
+  fechaCreacion: Date;
 }

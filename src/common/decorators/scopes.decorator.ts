@@ -1,6 +1,10 @@
 import { applyDecorators, SetMetadata } from '@nestjs/common';
 import { Scope } from '../../modules/auth/scopes';
-import { ApiProblema, DocumentarAutenticacion } from './documentacion.decorator';
+import {
+  ApiProblema,
+  DocumentarAutenticacion,
+  DocumentarAutenticacionV2,
+} from './documentacion.decorator';
 
 export const SCOPES_REQUERIDOS = 'scopesRequeridos';
 export const SOLO_CLIENTES = 'soloClientesOAuth';
@@ -21,6 +25,10 @@ export const Scopes = (...scopes: [Scope, ...Scope[]]) =>
     DocumentarAutenticacion(),
     ApiProblema(403, `El token no trae los scopes requeridos: ${scopes.join(', ')}`),
   );
+
+/** Lo mismo que @Scopes, para una ruta /api/v2: documenta el ProblemDetails del contrato v2. */
+export const ScopesV2 = (...scopes: [Scope, ...Scope[]]) =>
+  applyDecorators(SetMetadata(SCOPES_REQUERIDOS, scopes), DocumentarAutenticacionV2());
 
 /**
  * La ruta solo admite el token de un cliente OAuth (client_credentials: lleva `client_id`). El

@@ -618,7 +618,7 @@ describe('Entrega de webhooks', () => {
       const mias = lineas.filter((l) => l.includes('Entrega'));
       expect(mias.length).toBeGreaterThanOrEqual(2);
       const texto = mias.join('\n');
-      expect(texto).toMatch(/Entrega \d+ \(booking\.cancelled\) intento 1\/5: PENDIENTE 500/);
+      expect(texto).toMatch(/Entrega \d+ \(booking\.cancelled v1\) intento 1\/5: PENDIENTE 500/);
       expect(texto).toMatch(/intento 2\/5: ENTREGADO 200/);
       const firmas = receptor.recibidos.map((r) => r.cabeceras['x-webhook-signature'] as string);
       expect(firmas.length).toBeGreaterThanOrEqual(2);

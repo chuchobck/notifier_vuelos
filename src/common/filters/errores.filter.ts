@@ -5,6 +5,8 @@ import { ejecutarEnContexto, obtenerContexto } from '../contexto/contexto-petici
 import { contextoDeLaPeticion } from '../contexto/contexto.middleware';
 import { ErrorNegocio } from '../errores/error-negocio';
 import { CONTENT_TYPE_PROBLEMA } from '../errores/problem-details';
+import { aProblemDetailsV2, PREFIJO_RUTAS_V2 } from '../errores/problem-details-v2';
+import { correlacionActual, nuevoCorrelationId } from '../contexto/correlation-id';
 import { traducirExcepcion } from '../errores/traducir-excepcion';
 import { plantillaDeRuta, SIN_PLANTILLA } from '../../observabilidad/plantilla-ruta';
 
@@ -17,7 +19,9 @@ interface CapaExpress {
 /**
  * Filtro global: todo error sale como `application/problem+json` (RFC 9457), sea de una
  * excepción de Nest, de una regla de negocio, de una ruta inexistente o de un fallo que nadie
- * previó. El stack de un 5xx queda en el log; al cliente nunca le llega.
+ * previó. El stack de un 5xx queda en el log; al cliente nunca le llega. En /api/v2/** sale el
+ * ProblemDetails del contrato v2 (con instance, correlation_id, timestamp y su enum de code); en
+ * lo demás, el de v1 sin cambios.
  */
 @Catch()
 export class ErroresFilter implements ExceptionFilter {
@@ -68,10 +72,18 @@ export class ErroresFilter implements ExceptionFilter {
       return;
     }
     for (const [nombre, valor] of Object.entries(cabeceras)) respuesta.setHeader(nombre, valor);
+    const cuerpo = ruta.startsWith(PREFIJO_RUTAS_V2)
+      ? aProblemDetailsV2(
+          problema,
+          ruta,
+          contexto?.correlationId ?? correlacionActual() ?? nuevoCorrelationId(),
+          new Date(),
+        )
+      : problema;
     respuesta
       .status(problema.status)
       .setHeader('Content-Type', CONTENT_TYPE_PROBLEMA)
-      .send(JSON.stringify(problema));
+      .send(JSON.stringify(cuerpo));
   }
 
   /** Métodos con los que existe la ruta pedida; vacío si la ruta no existe con ninguno. */

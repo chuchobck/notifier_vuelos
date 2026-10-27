@@ -16,6 +16,7 @@ import {
   validateSync,
 } from 'class-validator';
 import { esOrigenEmisor, esUrlJwks } from './autenticacion';
+import { FORMATO_CODIGO_AEROLINEA } from './eventos';
 import { esUrlOtlp } from './observabilidad';
 import { esOrigenValido, listarOrigenes } from './origenes-cors';
 import { parsearTrustProxy } from './proxy';
@@ -208,6 +209,17 @@ export class VariablesEntorno {
   @IsInt({ message: 'NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS debe ser un número entero' })
   @IsOptional()
   NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS?: number;
+
+  /**
+   * El código de la aerolínea en el `source` de cada CloudEvent (`/aerolineas/<código>/vuelos`,
+   * contrato v2 §8): un segmento en minúsculas, como `ecoairlines`. Sin valor: quinde.
+   */
+  @Matches(FORMATO_CODIGO_AEROLINEA, {
+    message:
+      'AIRLINE_CODE debe ser un código en minúsculas, dígitos y guiones (2 a 40), como ecoairlines',
+  })
+  @IsOptional()
+  AIRLINE_CODE?: string;
 
   /** `service.name` de las trazas y las métricas. Sin valor: quinde-notifier. */
   @Matches(/^[a-z][a-z0-9-]{0,62}$/, {

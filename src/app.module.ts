@@ -9,6 +9,7 @@ import { EntregaModule } from './modules/entrega/entrega.module';
 import { EventoModule } from './modules/evento/evento.module';
 import { SaludModule } from './modules/salud/salud.module';
 import { SuscripcionModule } from './modules/suscripcion/suscripcion.module';
+import { SuscripcionV2Module } from './modules/suscripcion/v2/suscripcion.v2.module';
 import { ObservabilidadModule } from './observabilidad/observabilidad.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { rutas } from './routes/index.routes';
@@ -31,6 +32,7 @@ import { rutas } from './routes/index.routes';
     SaludModule,
     AuditoriaModule,
     SuscripcionModule,
+    SuscripcionV2Module,
     EventoModule,
     EntregaModule,
 
