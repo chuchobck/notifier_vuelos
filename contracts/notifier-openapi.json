@@ -728,6 +728,123 @@
           }
         ]
       }
+    },
+    "/api/v2/vuelos/eventos": {
+      "get": {
+        "operationId": "listOutboxEvents",
+        "summary": "Feed de eventos CloudEvents (respaldo de los webhooks)",
+        "description": "Los eventos del dueño del token en orden de llegada, como CloudEvents (los mismos de la entrega v2). Paginación por cursor: `after` = el id del último leído; `limit` de 1 a 100 (20 por defecto). Un `after` desconocido o de otro dueño es 400.",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "after",
+            "required": false,
+            "in": "query",
+            "description": "Id del último evento ya procesado (el `id` de su CloudEvent, o `metadata.next_after`): devuelve los que llegaron después",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/VuelosEventName"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "description": "Id del proceso de negocio; se devuelve sin cambios (si falta, se genera)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página de eventos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedEventosDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "limit, after o type inválidos (VALIDATION_FAILED)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsV2"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el token, no es válido o venció (UNAUTHORIZED)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsV2"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Al token le falta el scope (FORBIDDEN)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsV2"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Se pasó del límite de peticiones por IP (RATE_LIMIT_EXCEEDED)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsV2"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No hay claves del servicio de identidad con las que verificar el token (PROVIDER_UNAVAILABLE)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsV2"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "MS.Vuelos — Telemetría (v2)"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
     }
   },
   "info": {
@@ -1265,6 +1382,106 @@
           "eventId",
           "deliveries",
           "duplicate"
+        ]
+      },
+      "CloudEventDto": {
+        "type": "object",
+        "properties": {
+          "specversion": {
+            "type": "string",
+            "enum": [
+              "1.0"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "example": "ec.edu.epn.booking.vuelos.booking.confirmed"
+          },
+          "source": {
+            "type": "string",
+            "example": "/aerolineas/quinde/vuelos"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "El eventId: el mismo que llegó por webhook"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subject": {
+            "type": "string",
+            "description": "bookingId, holdId o <flightNumber>/<date>"
+          },
+          "datacontenttype": {
+            "type": "string",
+            "enum": [
+              "application/json"
+            ]
+          },
+          "correlationid": {
+            "type": "string",
+            "example": "corr-vuelos-7f3a9c"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "specversion",
+          "type",
+          "source",
+          "id",
+          "time",
+          "subject",
+          "datacontenttype",
+          "correlationid",
+          "data"
+        ]
+      },
+      "MetadatosFeedDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "example": 1,
+            "description": "Eventos en esta página"
+          },
+          "next_after": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "El id del último evento de la página (para pedir la siguiente con `after`); null si la página vino vacía"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "total",
+          "next_after",
+          "timestamp"
+        ]
+      },
+      "FeedEventosDto": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CloudEventDto"
+            }
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/MetadatosFeedDto"
+          }
+        },
+        "required": [
+          "events",
+          "metadata"
         ]
       }
     }

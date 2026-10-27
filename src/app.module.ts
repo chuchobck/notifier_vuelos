@@ -7,6 +7,7 @@ import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { AutenticacionModule } from './modules/auth/autenticacion.module';
 import { EntregaModule } from './modules/entrega/entrega.module';
 import { EventoModule } from './modules/evento/evento.module';
+import { EventoV2Module } from './modules/evento/v2/evento.v2.module';
 import { SaludModule } from './modules/salud/salud.module';
 import { SuscripcionModule } from './modules/suscripcion/suscripcion.module';
 import { SuscripcionV2Module } from './modules/suscripcion/v2/suscripcion.v2.module';
@@ -34,6 +35,7 @@ import { rutas } from './routes/index.routes';
     SuscripcionModule,
     SuscripcionV2Module,
     EventoModule,
+    EventoV2Module,
     EntregaModule,
 
     // Tabla de rutas: src/routes/index.routes.ts

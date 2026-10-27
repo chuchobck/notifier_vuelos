@@ -1,5 +1,6 @@
 import { Routes } from '@nestjs/core';
 import { eventoRoutes } from '../modules/evento/evento.routes';
+import { eventoV2Routes } from '../modules/evento/v2/evento.v2.routes';
 import { saludRoutes } from '../modules/salud/salud.routes';
 import { suscripcionRoutes } from '../modules/suscripcion/suscripcion.routes';
 import { suscripcionV2Routes } from '../modules/suscripcion/v2/suscripcion.v2.routes';
@@ -11,12 +12,14 @@ import { suscripcionV2Routes } from '../modules/suscripcion/v2/suscripcion.v2.ro
  *   /health, /health/ready        salud (sin versión: la sondea el orquestador)
  *   /flights/v1/webhooks          suscripciones, la misma ruta que en el core (contrato 1.5.0.0)
  *   /api/v2/vuelos/webhooks       suscripciones del contrato de Vuelos v2 (entrega CloudEvents)
+ *   /api/v2/vuelos/eventos        feed de eventos del contrato de Vuelos v2 (CloudEvents)
  *   /internal/v1/events           publicación de eventos (solo el core)
  */
 export const rutas: Routes = [
   ...saludRoutes,
   ...suscripcionRoutes,
   ...suscripcionV2Routes,
+  ...eventoV2Routes,
   ...eventoRoutes,
 ];
 

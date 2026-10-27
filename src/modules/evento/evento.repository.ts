@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { TransaccionNotificaciones } from '../../prisma/prisma.service';
+import { PrismaService, TransaccionNotificaciones } from '../../prisma/prisma.service';
+import { TipoEvento } from '../compartido/eventos-webhook';
+import { EventoInterno } from './traductores/evento-interno';
 import { CloudEvent } from './traductores/cloudevent.v2';
 import { WebhookPayload } from './traductores/webhook-payload.v1';
 
@@ -25,6 +27,53 @@ export interface EventoNuevo {
  */
 @Injectable()
 export class EventoRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * La posición interna (evento.id) del evento `eventId` en el feed de `idPropietario`, o null si
+   * no existe o es de otro dueño (los dos casos son iguales para quien pregunta).
+   */
+  async posicionEnFeed(idPropietario: string, eventId: string): Promise<bigint | null> {
+    const fila = await this.prisma.db.evento.findFirst({
+      where: { id_evento: eventId, id_propietario: idPropietario },
+      select: { id: true },
+    });
+    return fila?.id ?? null;
+  }
+
+  /**
+   * Una página del feed: los eventos de `idPropietario` (y solo de él) posteriores a `desde`, en
+   * orden de llegada (evento.id, el índice ix_evento_feed), opcionalmente de un tipo.
+   */
+  async feed(
+    idPropietario: string,
+    pagina: { desde: bigint | null; tipo: TipoEvento | null; limite: number },
+  ): Promise<EventoInterno[]> {
+    const filas = await this.prisma.db.evento.findMany({
+      where: {
+        id_propietario: idPropietario,
+        ...(pagina.desde === null ? {} : { id: { gt: pagina.desde } }),
+        ...(pagina.tipo === null ? {} : { tipo: pagina.tipo }),
+      },
+      orderBy: { id: 'asc' },
+      take: pagina.limite,
+      select: {
+        id_evento: true,
+        tipo: true,
+        ocurrido_en: true,
+        correlation_id: true,
+        payload: true,
+      },
+    });
+    return filas.map((f) => ({
+      eventId: f.id_evento,
+      tipo: f.tipo as TipoEvento,
+      ocurridoEn: f.ocurrido_en,
+      correlationId: f.correlation_id,
+      data: f.payload as Record<string, unknown>,
+    }));
+  }
+
   /**
    * Guarda el evento si su eventId no existía. Devuelve false si ya existía: el único
    * (uq_evento_id_evento) hace que una publicación simultánea del mismo eventId espere a la

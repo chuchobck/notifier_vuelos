@@ -17,5 +17,7 @@ import { Traductores } from './traductores/traductores';
     Traductores,
     { provide: RegistroEsquemas, useFactory: () => new RegistroEsquemas() },
   ],
+  // El feed de v2 lee con el mismo repositorio y el mismo traductor
+  exports: [EventoRepository, Traductores],
 })
 export class EventoModule {}
