@@ -10,11 +10,12 @@ import { listarOrigenes } from './origenes-cors';
 export const LIMITE_CUERPO = '100kb';
 
 /** Cabeceras que un navegador puede enviar a este servicio desde un origen permitido. */
-const CABECERAS_PERMITIDAS = ['Authorization', 'Content-Type', 'X-Request-Id'];
+const CABECERAS_PERMITIDAS = ['Authorization', 'Content-Type', 'X-Request-Id', 'X-Correlation-Id'];
 
 /** Cabeceras de la respuesta que el navegador deja leer al código del origen permitido. */
 const CABECERAS_EXPUESTAS = [
   'X-Request-Id',
+  'X-Correlation-Id',
   'X-Trace-Id',
   'Retry-After',
   'X-RateLimit-Limit',

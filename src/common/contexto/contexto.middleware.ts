@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 import { plantillaDeRuta, SIN_PLANTILLA } from '../../observabilidad/plantilla-ruta';
 import { ContextoPeticion, ejecutarEnContexto, normalizarIp } from './contexto-peticion';
+import { CABECERA_CORRELACION, resolverCorrelationId } from './correlation-id';
 import { CABECERA_REQUEST_ID, resolverRequestId } from './request-id';
 
 const logger = new Logger('HTTP');
@@ -17,9 +18,10 @@ export function contextoDeLaPeticion(peticion: Request): ContextoPeticion | unde
 }
 
 /**
- * El contexto de la petición, creado la primera vez que se pide (con su X-Request-Id y su línea de
- * acceso al terminar) y reusado después. Lo piden el middleware de observabilidad, que va primero
- * (necesita el request id para su span), y `middlewareRequestId`: un solo id por petición.
+ * El contexto de la petición, creado la primera vez que se pide (con su X-Request-Id, su
+ * X-Correlation-Id y su línea de acceso al terminar) y reusado después. Lo piden el middleware de
+ * observabilidad, que va primero (necesita el request id para su span), y `middlewareRequestId`:
+ * un solo id por petición.
  *
  * La línea de acceso sigue el estándar de observabilidad: método, PLANTILLA de la ruta (nunca la
  * pedida: ni un id ni un `?token=` llegan al log), status, duración y, si es un cliente OAuth, su
@@ -30,11 +32,13 @@ export function asegurarContexto(peticion: Request, respuesta: Response): Contex
   if (existente) return existente;
   const contexto: ContextoPeticion = {
     requestId: resolverRequestId(peticion.headers['x-request-id']),
+    correlationId: resolverCorrelationId(peticion.headers['x-correlation-id']),
     ip: normalizarIp(peticion.ip),
     usuario: null,
   };
   (peticion as PeticionConContexto)[CONTEXTO_EN_PETICION] = contexto;
   respuesta.setHeader(CABECERA_REQUEST_ID, contexto.requestId);
+  respuesta.setHeader(CABECERA_CORRELACION, contexto.correlationId);
 
   const inicio = process.hrtime.bigint();
   respuesta.on('finish', () => {

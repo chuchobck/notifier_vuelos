@@ -1,6 +1,7 @@
 import { LoggerService, LogLevel } from '@nestjs/common';
 import { camposDeTraza } from '../../observabilidad/trazas';
 import { obtenerContexto } from '../contexto/contexto-peticion';
+import { correlacionActual } from '../contexto/correlation-id';
 
 /** Adónde va cada línea. Por defecto, la salida estándar; las pruebas pasan un arreglo. */
 export type SalidaLog = (linea: string) => void;
@@ -19,12 +20,13 @@ const escribirEnConsola: SalidaLog = (linea) => {
 };
 
 /**
- * Logger de la app: una línea JSON por mensaje, con el X-Request-Id de la petición en curso y la
+ * Logger de la app: una línea JSON por mensaje, con el X-Request-Id y el X-Correlation-Id de la
+ * petición en curso (o el correlationId de la entrega que se está enviando) y la
  * traza (traceId y spanId del span activo, o del SERVER de la petición), venga de donde venga (un
  * service, el filtro de errores, el log de acceso, el verificador de tokens):
  *
  *   {"time":"2026-10-15T12:00:00.000Z","level":"log","context":"HTTP","requestId":"8d1f...",
- *    "traceId":"4bf9...","spanId":"00f0...","message":"GET /flights/v1/webhooks 200 12.3ms"}
+ *    "correlationId":"corr-vuelos-7f3a9c","traceId":"4bf9...","spanId":"00f0...","message":"GET /flights/v1/webhooks 200 12.3ms"}
  *
  * No hay un filtro que borre datos sensibles de los mensajes: la regla es no ponerlos (ningún
  * token, secreto, firma, URL de un webhook ni cuerpo de un evento), y una prueba escanea los logs
@@ -89,6 +91,7 @@ export class LoggerJson implements LoggerService {
       level: nivel,
       context: contexto,
       requestId: peticion?.requestId,
+      correlationId: correlacionActual(),
       traceId: traza?.traceId,
       spanId: traza?.spanId,
       message: comoTexto(mensaje),

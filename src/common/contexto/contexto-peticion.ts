@@ -7,6 +7,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export interface ContextoPeticion {
   /** X-Request-Id: el que mandó el cliente si tenía un formato válido, o uno generado. */
   requestId: string;
+  /**
+   * X-Correlation-Id (contrato v2, §6): el proceso de negocio completo. El que llegó, sin cambios,
+   * si tiene formato válido; si no, `corr-<uuid>`. Vuelve en cada respuesta y va en cada log.
+   */
+  correlationId: string;
   /** IP del cliente (con `trust proxy` configurado, la de X-Forwarded-For). */
   ip: string | null;
   /**
