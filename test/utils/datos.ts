@@ -50,6 +50,25 @@ export class Datos {
     return { id: (respuesta.body as { id: string }).id, secreto };
   }
 
+  /** Registra una suscripción v2 (POST /api/v2/vuelos/webhooks) y devuelve su id. */
+  async suscribirV2(
+    dueno: string,
+    url: string,
+    eventos: TipoEvento[],
+    secreto = `secreto-e2e-${randomUUID()}`,
+  ): Promise<{ id: string; secreto: string }> {
+    const respuesta = await request(this.app.getHttpServer())
+      .post('/api/v2/vuelos/webhooks')
+      .set('Authorization', `Bearer ${this.tokenDe(dueno)}`)
+      .send({ url, events: eventos, secret: secreto });
+    if (respuesta.status !== 201) {
+      throw new Error(
+        `No se pudo suscribir (v2): ${respuesta.status} ${JSON.stringify(respuesta.body)}`,
+      );
+    }
+    return { id: (respuesta.body as { id: string }).id, secreto };
+  }
+
   /** POST /internal/v1/events con el token del core. */
   publicar(cuerpo: unknown, token = this.identidad.firmarPublicador()) {
     return request(this.app.getHttpServer())

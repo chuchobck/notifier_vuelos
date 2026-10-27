@@ -29,6 +29,9 @@ const EVENTOS_WEBHOOK = 'src/modules/compartido/eventos-webhook.ts';
 const SUSCRIPCION_SERVICE = 'src/modules/suscripcion/suscripcion.service.ts';
 const SUSCRIPCION_REPO = 'src/modules/suscripcion/suscripcion.repository.ts';
 const AUDITORIA = 'src/modules/auditoria/auditoria.service.ts';
+const CLOUDEVENT = 'src/modules/evento/traductores/cloudevent.v2.ts';
+const FIRMA_V2 = 'src/modules/compartido/firma-cloudevents.ts';
+const FILTRO_ERRORES = 'src/common/filters/errores.filter.ts';
 
 const TOKEN = 'test/token.e2e-spec.ts';
 const PUBLICACION = 'test/publicacion.e2e-spec.ts';
@@ -37,6 +40,8 @@ const SUSCRIPCIONES = 'test/suscripciones.e2e-spec.ts';
 const ESCANEO = 'test/escaneo.e2e-spec.ts';
 const UNIDADES = 'test/unidades.e2e-spec.ts';
 const IMPORTACION = 'test/importacion.e2e-spec.ts';
+const V2 = 'test/v2.e2e-spec.ts';
+const OBSERVABILIDAD = 'test/observabilidad.e2e-spec.ts';
 
 /** nombre, archivo, cambios [buscar, reemplazar], prueba y filtro (-t) que debe fallar. */
 const MUTACIONES = [
@@ -288,8 +293,8 @@ const MUTACIONES = [
     archivo: ENTREGA,
     cambios: [
       [
-        '      `Entrega ${e.id} (${e.tipo}) intento',
-        '      `Entrega ${e.id} ${e.url} (${e.tipo}) intento',
+        '        `Entrega ${e.id} (${e.tipo} ${e.formato}) intento ${e.intentos}/` +',
+        '        `Entrega ${e.id} ${e.url} (${e.tipo} ${e.formato}) intento ${e.intentos}/` +',
       ],
     ],
     prueba: ENTREGA_PRUEBA,
@@ -324,8 +329,8 @@ const MUTACIONES = [
         '    const { count } = await tx.suscripcion.updateMany({\n      where: { id, activo: true },',
       ],
       [
-        '    const actual = await tx.suscripcion.findFirst({\n      where: { id, id_propietario: idPropietario, activo: true },',
-        '    const actual = await tx.suscripcion.findFirst({\n      where: { id, activo: true },',
+        '      where: { id, id_propietario: idPropietario, activo: true, formato },',
+        '      where: { id, activo: true, formato },',
       ],
     ],
     prueba: SUSCRIPCIONES,
@@ -358,6 +363,148 @@ const MUTACIONES = [
     cambios: [["        'webhook-secreto',", "        'webhook-secreto-v2',"]],
     prueba: IMPORTACION,
     filtro: 'secreto ORIGINAL del core',
+  },
+  // --- fase N2 (contrato v2 y CloudEvents) y 7e (observabilidad) ------------------------------
+  {
+    nombre: 'cloudevents-a-v1: una suscripción v1 recibe el CloudEvent en vez del WebhookPayload',
+    archivo: EVENTO_REPO,
+    cambios: [["(CASE s.formato WHEN 'v2' THEN", "(CASE s.formato WHEN 'v1' THEN"]],
+    prueba: V2,
+    filtro: 'byte a byte',
+  },
+  {
+    nombre: 'sin-correlationid: el CloudEvent pierde la extensión correlationid',
+    archivo: CLOUDEVENT,
+    cambios: [['      correlationid: evento.correlationId,\n', '']],
+    prueba: V2,
+    filtro: 'el correlationId del sobre gana',
+  },
+  {
+    nombre: 'sin-cabecera-correlacion: la entrega v2 no manda X-Correlation-Id',
+    archivo: ENTREGA,
+    cambios: [
+      [
+        '        ...cabecerasDeFirmaV2(secreto, cuerpo),\n        [CABECERA_CORRELACION]: e.correlationId,\n',
+        '        ...cabecerasDeFirmaV2(secreto, cuerpo),\n',
+      ],
+    ],
+    prueba: V2,
+    filtro: 'sin correlationId en el sobre',
+  },
+  {
+    nombre: 'correlacion-del-sobre: se ignora el correlationId del sobre (gana la cabecera)',
+    archivo: EVENTO_SERVICE,
+    cambios: [
+      [
+        'correlationId: sobre.correlationId ?? correlacionActual() ?? nuevoCorrelationId(),',
+        'correlationId: correlacionActual() ?? nuevoCorrelationId(),',
+      ],
+    ],
+    prueba: V2,
+    filtro: 'el correlationId del sobre gana',
+  },
+  {
+    nombre: 'type-sin-prefijo: el type del CloudEvent sin ec.edu.epn.booking.vuelos.',
+    archivo: CLOUDEVENT,
+    cambios: [
+      ['      type: `${PREFIJO_TIPO_CLOUDEVENT}${evento.tipo}`,', '      type: evento.tipo,'],
+    ],
+    prueba: V2,
+    filtro: 'booking.confirmed: cumple el contrato v2',
+  },
+  {
+    nombre: 'feed-sin-dueno: el feed devuelve eventos de otros dueños',
+    archivo: EVENTO_REPO,
+    cambios: [
+      [
+        '      where: {\n        id_propietario: idPropietario,\n        ...(pagina.desde',
+        '      where: {\n        ...(pagina.desde',
+      ],
+    ],
+    prueba: V2,
+    filtro: 'aislamiento',
+  },
+  {
+    nombre: 'feed-cursor-ajeno: el after de otro dueño se acepta como cursor',
+    archivo: EVENTO_REPO,
+    cambios: [
+      [
+        'where: { id_evento: eventId, id_propietario: idPropietario },',
+        'where: { id_evento: eventId },',
+      ],
+    ],
+    prueba: V2,
+    filtro: 'aislamiento',
+  },
+  {
+    nombre: 'traceparent-al-tercero: la entrega manda traceparent al receptor',
+    archivo: ENTREGA,
+    cambios: [
+      [
+        "import { marcarError } from '../../observabilidad/trazas';",
+        "import { marcarError, traceparentDe } from '../../observabilidad/trazas';",
+      ],
+      [
+        'this.cliente.enviar({ url: e.url, cuerpo, cabeceras: this.cabeceras(e, secreto, cuerpo) }),',
+        'this.cliente.enviar({ url: e.url, cuerpo, cabeceras: { ...this.cabeceras(e, secreto, cuerpo), traceparent: traceparentDe(span) } }),',
+      ],
+    ],
+    prueba: OBSERVABILIDAD,
+    filtro: 'continúa la traza',
+  },
+  {
+    nombre: 'traza-cortada: la entrega no cuelga de la traza del evento (span raíz)',
+    archivo: ENTREGA,
+    cambios: [
+      ['      contextoDeTraceparent(e.traceparent),', '      contextoDeTraceparent(null),'],
+    ],
+    prueba: OBSERVABILIDAD,
+    filtro: 'continúa la traza',
+  },
+  {
+    nombre: 'firma-v2: la firma v2 incluye un timestamp que el contrato no dice',
+    archivo: FIRMA_V2,
+    cambios: [
+      [
+        "createHmac('sha256', secreto).update(cuerpo).digest('hex')",
+        "createHmac('sha256', secreto).update(`0.${cuerpo}`).digest('hex')",
+      ],
+    ],
+    prueba: V2,
+    filtro: 'booking.cancelled: cumple el contrato v2',
+  },
+  {
+    nombre: 'reintentos-v2: la quinta espera de v2 es de 2 h en vez de 6 h',
+    archivo: ENTREGA,
+    cambios: [
+      ['  esperasMinutos: [1, 5, 30, 120, 360],', '  esperasMinutos: [1, 5, 30, 120, 120],'],
+    ],
+    prueba: V2,
+    filtro: 'reintentos del contrato v2',
+  },
+  {
+    nombre: 'problem-v1-en-v2: /api/v2 responde el ProblemDetails de v1',
+    archivo: FILTRO_ERRORES,
+    cambios: [
+      [
+        'const cuerpo = ruta.startsWith(PREFIJO_RUTAS_V2)',
+        'const cuerpo = ruta.startsWith("/nunca/")',
+      ],
+    ],
+    prueba: V2,
+    filtro: '401 y 403 con el ProblemDetails v2',
+  },
+  {
+    nombre: 'metrica-con-ruta-cruda: la línea de acceso escribe la URL pedida',
+    archivo: 'src/common/contexto/contexto.middleware.ts',
+    cambios: [
+      [
+        '`${peticion.method} ${plantillaDeRuta(peticion) ?? SIN_PLANTILLA} ${respuesta.statusCode} `',
+        '`${peticion.method} ${peticion.originalUrl} ${respuesta.statusCode} `',
+      ],
+    ],
+    prueba: 'test/transversal.e2e-spec.ts',
+    filtro: 'la línea de log de la petición',
   },
 ];
 

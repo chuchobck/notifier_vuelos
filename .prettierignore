@@ -11,3 +11,5 @@ docs
 
 # Generado por npm run openapi:export (una prueba lo compara)
 contracts/notifier-openapi.json
+# Copia tal cual del contrato de Vuelos v2 del core (no se edita a mano)
+test/contratos/
