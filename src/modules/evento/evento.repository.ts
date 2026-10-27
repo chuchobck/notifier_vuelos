@@ -12,6 +12,10 @@ export interface EventoNuevo {
   recibido: Date;
   huella: string;
   publicadoPor: string;
+  /** X-Correlation-Id del proceso que originó el hecho (nunca vacío). */
+  correlationId: string;
+  /** traceparent del span que recibió el evento, para que cada entrega cuelgue de su traza. */
+  traceparent: string | null;
 }
 
 /**
@@ -29,10 +33,11 @@ export class EventoRepository {
     const filas = await tx.$queryRaw<Array<{ id: bigint }>>`
       INSERT INTO notificaciones.evento
              (id_evento, tipo, version_esquema, id_propietario, payload, ocurrido_en, recibido_en,
-              huella, publicado_por)
+              huella, publicado_por, correlation_id, traceparent)
       VALUES (${evento.eventId}::uuid, ${evento.tipo}, ${evento.version}, ${evento.idPropietario},
               ${JSON.stringify(evento.data)}::jsonb, ${evento.ocurrido}::timestamptz,
-              ${evento.recibido}::timestamptz, ${evento.huella}, ${evento.publicadoPor})
+              ${evento.recibido}::timestamptz, ${evento.huella}, ${evento.publicadoPor},
+              ${evento.correlationId}, ${evento.traceparent})
       ON CONFLICT ON CONSTRAINT uq_evento_id_evento DO NOTHING
       RETURNING id`;
     return filas.length === 1;

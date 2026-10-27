@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { correlacionActual, nuevoCorrelationId } from '../../common/contexto/correlation-id';
 import { CODIGO_SIN_EQUIVALENTE } from '../../common/errores/codigo-error';
 import { ErrorNegocio } from '../../common/errores/error-negocio';
 import { Reloj } from '../../common/reloj';
+import { traceparentActivo } from '../../observabilidad/contexto-traza';
 import { Observabilidad } from '../../observabilidad/observabilidad';
 import { PrismaService } from '../../prisma/prisma.service';
 import { canonico } from './contrato/compatibilidad';
@@ -55,6 +57,10 @@ export class PublicacionEventos {
         recibido: ahora,
         huella,
         publicadoPor,
+        // El X-Correlation-Id de la publicación (el core lo manda si el hecho tenía uno; si no,
+        // el que generó este servicio al recibirla)
+        correlationId: correlacionActual() ?? nuevoCorrelationId(),
+        traceparent: traceparentActivo(),
       });
       if (!nuevo) {
         const existente = await this.repositorio.existente(tx, sobre.eventId);
