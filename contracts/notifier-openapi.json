@@ -850,7 +850,7 @@
   "info": {
     "title": "Quinde · Notifier",
     "description": "Suscripciones a webhooks y entrega firmada de los eventos del sistema de vuelos Quinde. Verifica los tokens RS256 de identity_vuelos por su JWKS.",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "contact": {}
   },
   "tags": [

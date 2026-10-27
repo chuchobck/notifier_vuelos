@@ -9,7 +9,8 @@ de entregar: guarda cada evento en su propia bandeja y lo publica aquí.
 | Fase | Estado | Verificación |
 | --- | --- | --- |
 | 5a. Notifier | Hecha (2026-10-16), en `feat/r2-notifier` | `lint`, `format:check` y `build` en cada commit. `npm test`: 254 pruebas en 10 suites contra PostgreSQL 16 local y 18.6 en CI, en verde varias veces seguidas sobre el código final. `npm run test:mutaciones`: 33 de 33 mutaciones detectadas. `npm run eventos:breaking` contra `origin/main`: los 12 esquemas como archivos nuevos (compatible). AsyncAPI validado con `@asyncapi/cli` 6.2.1 (y un `$ref` roto lo hace fallar). Verificación real con identity_vuelos (con el parche local de `events:publish`, ver Hallazgos) y un receptor local: 201 al suscribir, 403 al publicar con el token de la persona, 202 al publicar con el del core, 200 al repetirlo, el receptor recibió el POST y la firma recalculada con `openssl` coincidió; con identity caída y el notifier recién arrancado, 503 `AUTH_UNAVAILABLE` con `Retry-After: 10`, y al volver, 202. Salidas en el reporte del pull request |
-| 5b. Core publica aquí | Pendiente (repo del core) | — |
+| 5b. Core publica aquí | Hecha en el core (`WEBHOOKS_MODE=notifier`, main `b350502`) | La verificación real de N2 corrió contra el core de `main` publicando aquí |
+| N2. Contrato v2: CloudEvents a Booking + 7e. Observabilidad | Hecha (2026-10-27), en `feat/v2-cloudevents` | Ver la sección **Fase N2 y 7e** al final: 289 pruebas, 46 de 46 mutaciones, `eventos:breaking` compatible, AsyncAPI válido, comprobación de migraciones y verificación real con identity y el core de `main` |
 
 ## Qué se copió y qué cambió
 
@@ -90,10 +91,19 @@ Las marcadas con **(sin consultar)** se tomaron durante la fase sin poder pregun
 
 ## Pendientes
 
-- **identity_vuelos**: agregar `events:publish` a `SCOPES` y al CHECK `ck_cliente_oauth_scopes`, y
-  crear el cliente del core (`npm run cliente:crear -- --nombre "Core de vuelos" --scopes
-  "events:publish" --client-id core-vuelos`). Sin eso, el core no puede publicar.
-- **Core, fase 5b**: ver la sección siguiente.
+- ~~identity_vuelos: `events:publish`~~: hecho en identity (fase I2, main `9823f80`; el cliente se
+  crea con `--permitir-eventos`).
+- **Core**: encender `EVENT_ENVELOPE_CORRELATION_ID=true` (este servicio ya acepta `correlationId`
+  en los esquemas 1.x) y correr `npm run eventos:sync` para traer los esquemas 1.1; publicar los
+  tipos nuevos (`hold.created`, `booking.seat_changed`, `flight.status_changed`) y la data ampliada
+  cuando los tenga. Ver **Lo que el core debe agregar al sobre** al final.
+- **Firma v2 por confirmar con el docente** (hex y sin marca de tiempo; `firma-cloudevents.ts`).
+- **Contrato v2**: no tiene `Event*` para `booking.ticket_issuing`, `booking.ticket_failed`,
+  `flight.schedule_changed` ni `flight.cancelled` (están en `VuelosEventName`, no en el `oneOf` de
+  `VuelosCloudEvent`): conviene reportarlo a quien mantiene el contrato.
+- **Gateway**: enrutar `/api/v2/vuelos/webhooks*` y `/api/v2/vuelos/eventos` al notifier (y el
+  resto de `/api/v2/vuelos/*` al core), y agregar al estándar de observabilidad la sección de
+  correlación (aquí se aplicó el §6 del contrato).
 - Purga de eventos y entregas viejas ya resueltas (hoy no se borra nada).
 - Un endpoint para que el dueño vea el estado de sus entregas (no está en el contrato).
 - Límite de peticiones compartido entre instancias (hoy en memoria por instancia, como el core).
@@ -145,3 +155,99 @@ a QUIÉN pertenecen (`ownerId`); el notifier decide a qué suscripciones van.
 notifier, el `client_id` y el `client_secret` del cliente `core-vuelos`, y al cortar,
 `WEBHOOK_DELIVERY_JOB_ENABLED=false` (su entrega se apaga en el mismo despliegue en que
 `/flights/v1/webhooks` pasa al notifier; orden en `docs/MIGRACION.md`).
+
+## Fase N2 y 7e (contrato v2 y observabilidad)
+
+Rama `feat/v2-cloudevents` desde `main` (`43998bc`). Las suscripciones y entregas a Booking pasan a
+CloudEvents 1.0 (`/api/v2/vuelos/webhooks`), con el feed `/api/v2/vuelos/eventos`, la correlación
+del §6 del contrato v2 y el estándar de observabilidad del gateway (fase 7e).
+
+### Qué se copió y qué cambió
+
+| De dónde | Qué | Cómo quedó |
+| --- | --- | --- |
+| gateway_vuelos `97cb777` | `traceparent`, `atributos`, `trazas`, `metricas` y el recolector OTLP falso de las pruebas | Tal cual |
+| core `b350502` | `express.ts`, `plantilla-ruta`, `contexto-traza`, `Observabilidad`, los gauges de la bandeja, `correlation-id`, `codigo-error-v2`, `migrar.sh`, `comprobar-migraciones.sh`, el transformador de Jest para `otlp-exporter-base` | Adaptados al notifier (`notifier_*`, `notificaciones`, psql local o contenedor) |
+| core `b350502` | `contracts/vuelos-openapi-v2.yaml` | Copia tal cual en `test/contratos/`: las pruebas validan contra él |
+| nuevo | Formato por suscripción, `Traductores` (WebhookPayload v1 y CloudEvent v2), firma v2, reintentos v2, `/api/v2/vuelos/webhooks`, el feed, `ProblemDetails` v2, los esquemas 1.1 y los 3 tipos nuevos | — |
+
+### Decisiones (todas sin consultar)
+
+| Tema | Decisión | Por qué |
+| --- | --- | --- |
+| Esquemas "v2" | Lo nuevo del sobre y de `data` es opcional: va como menor **1.1** en los mismos `<tipo>.v1.json`; los 3 tipos nuevos nacen en su `.v1.json`. No hay archivos `.v2.json` | Es lo que dice la regla de compatibilidad de `docs/EVENTOS.md` (manda si choca), lo que pide el core ("esquemas 1.x") y deja `eventos:breaking` en verde |
+| `correlationId` en el sobre | Opcional y aceptado en cualquier 1.x (también `"1.0"`) | El core lo manda con `schemaVersion` "1.0" cuando enciende `EVENT_ENVELOPE_CORRELATION_ID` |
+| De dónde sale el correlationId | Sobre → cabecera `X-Correlation-Id` de la publicación → `corr-<uuid>` generado; se guarda con el evento | `CloudEventBase` lo exige y el core no siempre lo tiene (procesos periódicos) |
+| Formato de la suscripción | Columna `formato` (`v1`/`v2`), fijado por la API que la creó; cada API lista y borra solo las suyas | `/flights/v1/webhooks` no puede listar tipos que su contrato no tiene |
+| Máximo de 10 y URL repetida | Se cuentan sumando v1 y v2 | Son el mismo recurso del dueño; una URL no debería recibir el mismo hecho dos veces |
+| v1 con la data 1.1 | Una suscripción v1 recibe el `data` tal como lo publicó el core (si el core manda campos 1.1, los recibe) | El `WebhookPayload` del contrato 1.5 no limita `data`; el mismo sobre 1.0 da exactamente los mismos bytes que antes |
+| `X-Correlation-Id` en v1 | Las entregas v1 suman esa cabecera (fuera del cuerpo y de la firma) | La pide el §6 para toda entrega; el cuerpo v1 no cambia |
+| Firma v2 | `sha256=` + HMAC-SHA256 del cuerpo en hex, sin marca de tiempo, en un solo archivo. **Pendiente de confirmar con el docente** | Es lo que dice el contrato (`HMAC-SHA256(secret, body)`); no dice la codificación |
+| Cabeceras v2 | `Content-Type: application/cloudevents+json`, `X-Webhook-Signature` y `X-Correlation-Id` (las del callback del contrato); sin `X-Webhook-Id/Event/Timestamp` | Modo estructurado: el resto va en el CloudEvent |
+| Reintentos v2 | 1, 5, 30, 120 y 360 min (6 intentos) | Los del contrato (`createWebhook`); v1 sigue con los del core |
+| `subject` | `holdId` en `hold.*`, `<flightNumber>/<date>` en `flight.status_changed`, `bookingId` en los demás | "bookingId, holdId o flightNumber/fecha" del contrato |
+| `source` | `/aerolineas/<AIRLINE_CODE>/vuelos`, `AIRLINE_CODE` opcional con `quinde` por defecto | No romper un despliegue que no la defina |
+| `secret` en la respuesta v2 | No se devuelve (ni enmascarado) | En el contrato v2 es `writeOnly` con minLength 16; lo detectó la validación contra el contrato |
+| `409` en v2 | URL repetida o máximo: 409 `VALIDATION_FAILED` (el contrato no declara 409 en `createWebhook` ni tiene un `code` para eso) | Las mismas reglas de v1, como pide la fase |
+| `Idempotency-Key` en `createWebhook` | Se acepta y no se usa | El contrato la declara opcional "idempotente por construcción" |
+| Feed | Orden de llegada al notifier; `after` = eventId; `next_after` = el id del último de la página (`null` si vino vacía); `total` = los de la página; `after` ajeno o desconocido: 400 iguales | El contrato no define `total` ni cuándo `next_after` es `null`; así Booking puede volver más tarde desde el último |
+| Logs | Cada línea con `requestId`, `correlationId`, `traceId` y `spanId`; la de acceso con la plantilla y sin IP ni `sub` | El estándar prohíbe IPs y rutas crudas en logs |
+| Métricas propias | `notifier_deliveries_total{result,format}`, `notifier_delivery_duration_seconds{format}`, `notifier_events_received_total{result}`, `notifier_deliveries_pending`, `notifier_deliveries_oldest_pending_seconds` | Las que pide la fase, con etiquetas cerradas; la entrega al tercero no va en `http_client_*` (su `upstream` es una lista cerrada de servicios Quinde) |
+| Span de la entrega | `POST webhook`, CLIENT, hijo del `traceparent` guardado con el evento (el SERVER que lo recibió) | Así la traza de la reserva llega hasta la entrega |
+| Migraciones | `db/migraciones/` + `migrar.sh` + comprobación en CI, como el core | El esquema cambia y una base de la fase 5a no se puede recrear (tiene secretos) |
+| Dependencias | `@opentelemetry/*` y `prom-client` (las del estándar); `js-yaml` (dev, la del core) para leer el contrato v2 en las pruebas | — |
+
+### Hallazgos
+
+- `secret` es `writeOnly` en el contrato v2: devolverlo enmascarado (como v1) no cumple su minLength.
+  Lo encontró la validación contra el contrato.
+- Dentro de Jest el exportador OTLP no enviaba nada (`import('http')` dinámico sin
+  `--experimental-vm-modules`); el core ya lo resolvía pasando `@opentelemetry/otlp-exporter-base`
+  por el transformador de `jose`. Se copió. En el servicio compilado no pasa.
+- El contrato v2 no cubre 4 de sus 15 `VuelosEventName` en `VuelosCloudEvent` (ver Pendientes).
+- Dos mutaciones de la 5a quedaron "no aplicables" porque cambió el texto que tocaban; se
+  actualizaron y se detectan.
+
+### Verificación
+
+- `lint`, `format:check` y `build` en cada commit. `npm test`: **289 pruebas en 12 suites**
+  (PostgreSQL 16 local), entre ellas `v2.e2e-spec.ts` (30) y `observabilidad.e2e-spec.ts` (4).
+- `npm run test:mutaciones`: **46 de 46** detectadas, entre ellas las pedidas: CloudEvents a una
+  suscripción v1, perder el `correlationid` (y la cabecera, y el del sobre), `type` sin prefijo,
+  feed sin filtrar por dueño (y el cursor ajeno), `traceparent` al tercero (y la traza cortada),
+  más firma v2, reintentos v2, `ProblemDetails` v1 en v2 y ruta cruda en el log.
+- `eventos:breaking` contra `origin/main`: todo compatible. AsyncAPI válido con
+  `@asyncapi/cli@6.2.1`. `scripts/comprobar-migraciones.sh origin/main`: base migrada = base nueva
+  (y falla si se quita una línea de la migración). La migración corrió dos veces sobre la base local
+  de la 5a, con datos.
+- **Real en local** con identity y el core de `main` (copias en el scratchpad, sin cambios), el
+  notifier compilado y un receptor HTTP: una compra por `/api/v2/vuelos` del core con el token de
+  Booking (`client_credentials`), `X-Correlation-Id: corr-verif-n2-0001` y un `traceparent` propio;
+  el relevo publicó 3 eventos (sobre 1.0, sin `correlationId`) y el notifier entregó 3 CloudEvents y
+  1 `WebhookPayload` v1 con la correlación y la traza de la compra; un sobre 1.1 hecho a mano con
+  `correlationId` y la data ampliada, y un `hold.created`; las firmas recalculadas con `openssl`
+  coinciden; los CloudEvents cumplen el contrato; el feed pagina y aísla por dueño; `/metrics` en
+  `:9468`; el log sin secretos, firmas, tokens, URL ni PNR. Salidas en el reporte del pull request.
+
+### Qué no se pudo verificar
+
+- La imagen de Docker en local (como en la 5a); la construye el CI.
+- Contra un Jaeger real: las trazas se verificaron con el recolector OTLP falso (pruebas) y por el
+  `traceId` compartido en las bases y los logs del core y del notifier (verificación real).
+- La firma v2 contra lo que espere Booking (pendiente de confirmar).
+- PostgreSQL 18 en local (lo corre el CI).
+
+## Lo que el core debe agregar al sobre
+
+- `correlationId` (opcional, `^[A-Za-z0-9._:-]{1,100}$`): encender `EVENT_ENVELOPE_CORRELATION_ID=true`.
+  Ya funciona con `schemaVersion` "1.0"; sin él, el notifier usa la cabecera `X-Correlation-Id`.
+- `schemaVersion` "1.1" cuando mande la data ampliada (todo opcional): en los `booking.*`,
+  `ownerId` (el `X-User-Id` del partner), `partnerOrderId`, `packageId`, `grandTotal`; en
+  `booking.ticket_issued`, `paymentReference` y `tickets`; en los cambios, `changeType`,
+  `amountCharged` y `paymentReference`; en `booking.cancelled`, `reasonCode`, `refundId` y
+  `seatsReleased`; en `booking.checked_in`, `passengersCheckedIn`; en `hold.expired`,
+  `seatsReleased` y `expiredAt`. Detalle en `docs/EVENTOS.md`.
+- Los tipos nuevos, cuando los tenga: `hold.created` (`holdId`, `expiresAt`), `booking.seat_changed`
+  y `flight.status_changed` (`flightNumber`, `date`, `newStatus`; uno por dueño afectado).
+- `npm run eventos:sync` en el core para traer los esquemas 1.1 a `contracts/notifier-eventos`.
+

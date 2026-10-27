@@ -49,6 +49,12 @@ cuenta como no definida.
 | `EVENTS_RATE_LIMIT_MAX` | No | `1200` | 1200 publicaciones por minuto e IP en `POST /internal/v1/events`, que no cuenta en el límite global (el core publica en ráfagas) |
 | `NOTIFIER_DELIVERY_JOB_ENABLED` | No | `true` | `true`: el proceso de entrega corre. Con `false` los eventos se guardan y se reparten, pero no se envían |
 | `NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS` | No | `10` | 10 segundos entre corridas (de 5 a 3600) |
+| `AIRLINE_CODE` | No | `ecoairlines` | `quinde`. El código de la aerolínea en el `source` de cada CloudEvent de una suscripción v2: `/aerolineas/<AIRLINE_CODE>/vuelos` (contrato de Vuelos v2, §8). Minúsculas, dígitos y guiones (2 a 40); otro formato no arranca. Cambiarlo cambia el `source` de lo que se entregue y del feed desde ese momento (lo ya congelado en `entrega.cuerpo` no cambia) |
+| `OTEL_SERVICE_NAME` | No | `quinde-notifier` | `quinde-notifier` (`service.name` de trazas y métricas; estándar de observabilidad de gateway_vuelos) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://jaeger:4318` | Vacía: las trazas no se exportan (el SDK arranca igual: `traceId` en los logs y `X-Trace-Id`). Con valor, OTLP/HTTP a `{endpoint}/v1/traces` en lotes cada 2 s, con plazo de 3 s: un recolector caído nunca frena una petición ni una entrega |
+| `OTEL_TRACES_SAMPLER_ARG` | No | `0.1` | 1.0 en desarrollo y 0.1 en producción (fracción de trazas raíz; una hija sigue a su padre, así que la traza del relevo del core decide) |
+| `TRACE_TRUST_INCOMING` | No | `true` | `true`: continúa el `traceparent` que llega (el gateway y el relevo del core). El notifier es interno; `false` solo si quedara expuesto sin gateway |
+| `METRICS_PORT` | No | `9464` | 9464 (en local, 9468: la tabla del estándar para correr los cinco servicios en una máquina). `/metrics` de Prometheus en ese puerto aparte, que el ingress no debe exponer; `0` lo apaga. Tiene que ser distinto de `PORT` |
 | `DB_PORT` | No (solo `docker-compose.yml`) | `5434` | 5434 |
 
 Generar la clave de los secretos (solo si el core todavía no tiene una; si la tiene, usar esa):
@@ -58,8 +64,9 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
 Los límites propios (10 altas de suscripción por minuto e IP, 10 suscripciones activas por
-usuario) y las reglas de entrega (5 intentos, esperas de 1, 5, 30 y 120 minutos, plazo de 5 s,
-baja tras 10 fallidas seguidas) están en el código, no en el entorno: son las del core.
+usuario, sumando v1 y v2) y las reglas de entrega están en el código, no en el entorno: v1, las del
+core (5 intentos, esperas de 1, 5, 30 y 120 minutos); v2, las del contrato de Vuelos v2 (6 intentos,
+esperas de 1, 5, 30, 120 y 360 minutos); en los dos, plazo de 5 s y baja tras 10 fallidas seguidas.
 
 ## Base de datos
 
@@ -70,7 +77,15 @@ identity: las credenciales de esta base no abren las otras.
 ```bash
 DATABASE_URL="postgresql://...@host/notifier_db?schema=notificaciones&sslmode=require" \
   CONFIRMAR_RESET=si ./db/reset.sh          # solo la primera vez: crea el esquema
+DATABASE_URL="..." ./db/migrar.sh           # en cada versión nueva, sobre una base que ya existe
 ```
+
+**Al desplegar esta versión (fase N2) sobre una base de la fase 5a**, correr `./db/migrar.sh`
+ANTES de arrancar la imagen nueva: `db/migraciones/001_cloudevents.sql` agrega
+`suscripcion.formato` (las que existen quedan `v1`: siguen recibiendo lo mismo), los 15 tipos,
+`evento.correlation_id` (a los eventos viejos les pone `corr-<eventId>`) y `evento.traceparent`, y
+rehace el índice del feed. Es idempotente y no borra datos; el CI comprueba que `main` + las
+migraciones deja la misma base que `db/esquema_notificaciones.sql`.
 
 **`db/reset.sh` borra solo el esquema `notificaciones`, nunca la base.** Contra un host que no es
 local exige `CONFIRMAR_RESET=si`, porque borra suscripciones reales (y sus secretos, que no se
@@ -83,16 +98,17 @@ se envió (una purga de lo viejo y entregado queda en Pendientes, `docs/PLAN.md`
 ## Red
 
 - `POST /internal/v1/events` es solo para el core. Exige un token de cliente OAuth con
-  `events:publish`, pero conviene además no publicarlo hacia internet (que el balanceador solo
-  enrute `/flights/v1/webhooks`, `/health` y `/api/docs`).
+  `events:publish`, pero conviene además no publicarlo hacia internet (que el gateway solo enrute
+  `/flights/v1/webhooks`, `/api/v2/vuelos/webhooks`, `/api/v2/vuelos/eventos`, `/health` y
+  `/api/docs`).
+- `METRICS_PORT` es para Prometheus por la red interna: nunca por el ingress.
 - El servicio necesita salir hacia el JWKS de identity y hacia las URL de los suscriptores (https,
   puerto que elija el tercero). Las URL hacia redes privadas, loopback o la metadata de la nube se
   rechazan al registrar y otra vez al conectar.
 
 ## El cliente que publica (el core)
 
-identity_vuelos todavía no tiene el scope `events:publish` (ver Pendientes en `docs/PLAN.md`).
-Cuando lo tenga:
+identity_vuelos tiene el scope `events:publish` desde su fase I2 (main). El cliente del core:
 
 ```bash
 # en identity_vuelos
@@ -111,7 +127,10 @@ curl -s -o /dev/null -w '%{http_code}\n' $BASE/flights/v1/webhooks   # 401 sin t
 curl -s $BASE/flights/v1/webhooks -H "Authorization: Bearer $TOKEN_PERSONA"   # [] o sus suscripciones
 curl -s -X POST $BASE/internal/v1/events -H "Authorization: Bearer $TOKEN_CORE" \
   -H 'Content-Type: application/json' -d @evento.json        # 202, y 200 si se repite
+curl -s $BASE/api/v2/vuelos/eventos -H "Authorization: Bearer $TOKEN_BOOKING"  # flights:read
+curl -s http://<ip-interna>:9464/metrics | grep -E '^(quinde_build_info|notifier_)'
 ```
 
-En el log de arranque tienen que aparecer `Tokens RS256 de <JWT_ISSUER>`, `Conectado a
+Cada respuesta lleva `X-Request-Id`, `X-Correlation-Id` y `X-Trace-Id`. En el log de arranque
+tienen que aparecer `Métricas en :9464/metrics`, `Tokens RS256 de <JWT_ISSUER>`, `Conectado a
 PostgreSQL` y `EntregaWebhooks: Activo: cada 10 s` (o `Apagado` si se apagó a propósito).
