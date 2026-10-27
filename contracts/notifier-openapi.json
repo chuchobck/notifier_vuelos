@@ -319,7 +319,7 @@
       "get": {
         "operationId": "listWebhooks",
         "summary": "Listar suscripciones de webhooks del partner",
-        "description": "Las suscripciones v2 activas del dueño del token (las de /flights/v1/webhooks no aparecen). El secreto va enmascarado.",
+        "description": "Las suscripciones v2 activas del dueño del token (las de /flights/v1/webhooks no aparecen). El secreto no se devuelve (writeOnly).",
         "parameters": [
           {
             "name": "X-Correlation-Id",
@@ -431,7 +431,7 @@
         },
         "responses": {
           "201": {
-            "description": "Webhook registrado (secreto enmascarado)",
+            "description": "Webhook registrado (sin el secreto: es writeOnly)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1229,11 +1229,6 @@
               "$ref": "#/components/schemas/VuelosEventName"
             }
           },
-          "secret": {
-            "type": "string",
-            "example": "****e-largo",
-            "description": "**** y los últimos 4 caracteres (como en v1: el secreto nunca vuelve en claro)"
-          },
           "active": {
             "type": "boolean",
             "example": true,
@@ -1249,7 +1244,6 @@
           "id",
           "url",
           "events",
-          "secret",
           "active",
           "createdAt"
         ]

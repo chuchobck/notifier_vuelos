@@ -52,7 +52,7 @@ export class SuscripcionV2Controller {
     summary: 'Listar suscripciones de webhooks del partner',
     description:
       'Las suscripciones v2 activas del dueño del token (las de /flights/v1/webhooks no aparecen). ' +
-      'El secreto va enmascarado.',
+      'El secreto no se devuelve (writeOnly).',
   })
   @ApiOkResponse({ type: [WebhookV2Dto], description: 'Suscripciones activas' })
   @ApiProblemaV2(429, LIMITE_CONSULTAS)
@@ -84,7 +84,7 @@ export class SuscripcionV2Controller {
   })
   @ApiCreatedResponse({
     type: WebhookV2Dto,
-    description: 'Webhook registrado (secreto enmascarado)',
+    description: 'Webhook registrado (sin el secreto: es writeOnly)',
   })
   @ApiProblemaV2(400, 'Cuerpo inválido o URL que no es un destino permitido (VALIDATION_FAILED)')
   @ApiProblemaV2(

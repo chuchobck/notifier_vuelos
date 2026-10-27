@@ -61,7 +61,11 @@ export class SolicitudWebhookV2Dto {
   secret!: string;
 }
 
-/** components.schemas.WebhookSubscription del contrato v2 al responder. */
+/**
+ * components.schemas.WebhookSubscription del contrato v2 al responder. Sin `secret`: en v2 es
+ * `writeOnly` (y con minLength 16, que el enmascarado de v1 no cumple), así que no vuelve ni
+ * enmascarado. v1 sigue devolviéndolo enmascarado, como el core.
+ */
 export class WebhookV2Dto {
   @ApiProperty({ format: 'uuid', readOnly: true })
   id!: string;
@@ -71,12 +75,6 @@ export class WebhookV2Dto {
 
   @ApiProperty({ enum: EVENTOS, enumName: 'VuelosEventName', isArray: true })
   events!: TipoEvento[];
-
-  @ApiProperty({
-    example: '****e-largo',
-    description: '**** y los últimos 4 caracteres (como en v1: el secreto nunca vuelve en claro)',
-  })
-  secret!: string;
 
   @ApiProperty({ example: true, readOnly: true })
   active!: boolean;
