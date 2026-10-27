@@ -233,7 +233,7 @@ describe('POST /internal/v1/events', () => {
       expect(JSON.stringify(respuesta.body)).not.toContain('0912345678');
     });
 
-    it('422 con un eventType que no es de los 12', async () => {
+    it('422 con un eventType que no es de los 15', async () => {
       for (const tipo of ['booking.created', 'payment.captured', 'BOOKING.CONFIRMED']) {
         const respuesta = await datos
           .publicar(sobre('booking.confirmed', dueno, { eventType: tipo }))
@@ -244,14 +244,14 @@ describe('POST /internal/v1/events', () => {
       }
     });
 
-    it('422 con una schemaVersion sin esquema (1.1 todavía no, 2.0 no existe)', async () => {
-      for (const version of ['1.1', '2.0', '9.9']) {
+    it('422 con una schemaVersion sin esquema (1.2 todavía no, 2.0 no existe)', async () => {
+      for (const version of ['1.2', '2.0', '9.9']) {
         const respuesta = await datos
           .publicar(sobre('booking.confirmed', dueno, { schemaVersion: version }))
           .expect(422);
         expect(respuesta.body.invalidParams[0]).toEqual({
           name: 'schemaVersion',
-          reason: 'unsupported version for this eventType; supported: 1.0',
+          reason: 'unsupported version for this eventType; supported: 1.0, 1.1',
         });
       }
     });

@@ -130,4 +130,4 @@ jobs:
       - name: La imagen corre como usuario sin privilegios y trae los esquemas
         run: |
           test "$(docker run --rm --entrypoint id quinde-notifier:ci -u)" = "1000"
-          test "$(docker run --rm --entrypoint sh quinde-notifier:ci -c 'ls contracts/events | wc -l')" = "12"
+          test "$(docker run --rm --entrypoint sh quinde-notifier:ci -c 'ls contracts/events | wc -l')" = "15"

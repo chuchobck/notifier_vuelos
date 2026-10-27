@@ -674,18 +674,21 @@
           "eventType": {
             "type": "string",
             "enum": [
+              "hold.created",
+              "hold.expired",
               "booking.confirmed",
               "booking.failed",
               "booking.changed",
               "booking.cancelled",
               "booking.baggage_added",
-              "hold.expired",
-              "flight.schedule_changed",
-              "flight.cancelled",
+              "booking.seat_changed",
               "booking.ticket_issuing",
               "booking.ticket_issued",
               "booking.ticket_failed",
-              "booking.checked_in"
+              "booking.checked_in",
+              "flight.status_changed",
+              "flight.schedule_changed",
+              "flight.cancelled"
             ],
             "example": "booking.confirmed"
           },
@@ -705,6 +708,12 @@
             "type": "string",
             "format": "uuid",
             "description": "Dueño del hecho (sub del token que creó el recurso): solo sus suscripciones lo reciben"
+          },
+          "correlationId": {
+            "type": "string",
+            "example": "corr-vuelos-7f3a9c",
+            "pattern": "^[A-Za-z0-9._:-]{1,100}$",
+            "description": "X-Correlation-Id del proceso que originó el hecho, sin cambios (desde 1.1, aceptado en cualquier 1.x). Va al CloudEvent (correlationid) y a la cabecera de cada entrega. Sin él, el de la cabecera X-Correlation-Id de esta publicación (o uno generado)"
           },
           "data": {
             "type": "object",

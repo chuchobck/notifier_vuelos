@@ -3,7 +3,7 @@ import addFormats from 'ajv-formats';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ParametroInvalido } from '../../../common/errores/error-negocio';
-import { EVENTOS_WEBHOOK, EventoWebhook, esEventoWebhook } from '../../compartido/eventos-webhook';
+import { EVENTOS, TipoEvento, esTipoEvento } from '../../compartido/eventos-webhook';
 import { FORMATO_ARCHIVO, FORMATO_VERSION, problemasDeArchivo } from './compatibilidad';
 
 /**
@@ -16,10 +16,12 @@ export const CARPETA_ESQUEMAS = resolve(__dirname, '..', '..', '..', '..', 'cont
 /** El sobre que publica el core, ya validado contra el esquema de su tipo y versión. */
 export interface SobreEvento {
   eventId: string;
-  eventType: EventoWebhook;
+  eventType: TipoEvento;
   schemaVersion: string;
   occurredAt: string;
   ownerId: string;
+  /** Desde 1.1 (opcional en cualquier 1.x): el X-Correlation-Id del proceso del hecho. */
+  correlationId?: string;
   data: Record<string, unknown>;
 }
 
@@ -52,20 +54,21 @@ export class EsquemasInvalidosError extends Error {
 /**
  * Los esquemas versionados de los eventos (contracts/events/<tipo>.v<mayor>.json), compilados
  * con Ajv al arrancar. Cada archivo cubre un mayor y lista en `schemaVersion.enum` los menores
- * que acepta. Los 12 tipos del contrato tienen que tener al menos su v1, o el servicio no
+ * que acepta. Los 15 tipos del contrato v2 tienen que tener al menos su v1, o el servicio no
  * arranca: un tipo sin esquema no se podría publicar.
  *
  * Validar un sobre:
- *   - `eventType` que no es uno de los 12, o un `schemaVersion` sin esquema: 422.
+ *   - `eventType` que no es uno de los 15, o un `schemaVersion` sin esquema: 422.
  *   - Cualquier otro incumplimiento del esquema (un campo que falta, uno de más, un formato): 400,
  *     con un `invalidParams` por campo que nombra el campo y nunca repite su valor.
  */
 export class RegistroEsquemas {
-  private readonly porTipo = new Map<EventoWebhook, Map<string, VersionMayor>>();
+  private readonly porTipo = new Map<TipoEvento, Map<string, VersionMayor>>();
 
   constructor(carpeta: string = CARPETA_ESQUEMAS) {
-    const ajv = new Ajv({ allErrors: true, strict: true });
-    addFormats(ajv, ['uuid', 'date-time']);
+    // allowUnionTypes: los campos que el contrato v2 deja en null (`["string", "null"]`)
+    const ajv = new Ajv({ allErrors: true, strict: true, allowUnionTypes: true });
+    addFormats(ajv, ['uuid', 'date-time', 'date']);
     const problemas: string[] = [];
 
     for (const nombre of readdirSync(carpeta)
@@ -87,22 +90,22 @@ export class RegistroEsquemas {
       const definicion = esquema as { properties: { schemaVersion: { enum: string[] } } };
       try {
         const validar = ajv.compile(esquema as object);
-        const versiones = this.porTipo.get(tipo as EventoWebhook) ?? new Map();
+        const versiones = this.porTipo.get(tipo as TipoEvento) ?? new Map();
         versiones.set(mayor, { versiones: definicion.properties.schemaVersion.enum, validar });
-        this.porTipo.set(tipo as EventoWebhook, versiones);
+        this.porTipo.set(tipo as TipoEvento, versiones);
       } catch (error) {
         problemas.push(`${nombre}: Ajv no lo compila (${(error as Error).message})`);
       }
     }
 
-    for (const tipo of EVENTOS_WEBHOOK) {
+    for (const tipo of EVENTOS) {
       if (!this.porTipo.get(tipo)?.has('1')) problemas.push(`falta ${tipo}.v1.json`);
     }
     if (problemas.length > 0) throw new EsquemasInvalidosError(problemas);
   }
 
   /** Las versiones que se aceptan de un tipo, de la más vieja a la más nueva. */
-  versionesDe(tipo: EventoWebhook): string[] {
+  versionesDe(tipo: TipoEvento): string[] {
     return [...(this.porTipo.get(tipo)?.values() ?? [])]
       .flatMap((m) => m.versiones)
       .sort(porVersion);
@@ -116,9 +119,9 @@ export class RegistroEsquemas {
     if (typeof eventType !== 'string') {
       return rechazo(400, [{ name: 'eventType', reason: 'must be a string' }]);
     }
-    if (!esEventoWebhook(eventType)) {
+    if (!esTipoEvento(eventType)) {
       return rechazo(422, [
-        { name: 'eventType', reason: `unknown event type; known: ${EVENTOS_WEBHOOK.join(', ')}` },
+        { name: 'eventType', reason: `unknown event type; known: ${EVENTOS.join(', ')}` },
       ]);
     }
     if (typeof schemaVersion !== 'string' || !FORMATO_VERSION.test(schemaVersion)) {

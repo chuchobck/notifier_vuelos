@@ -57,9 +57,9 @@ export class PublicacionEventos {
         recibido: ahora,
         huella,
         publicadoPor,
-        // El X-Correlation-Id de la publicación (el core lo manda si el hecho tenía uno; si no,
-        // el que generó este servicio al recibirla)
-        correlationId: correlacionActual() ?? nuevoCorrelationId(),
+        // El del sobre; si no, el X-Correlation-Id de la publicación (el core lo manda si el
+        // hecho tenía uno; si no, el que generó este servicio al recibirla)
+        correlationId: sobre.correlationId ?? correlacionActual() ?? nuevoCorrelationId(),
         traceparent: traceparentActivo(),
       });
       if (!nuevo) {
