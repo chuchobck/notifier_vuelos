@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaSuscripciones } from '../auditoria/auditoria.service';
-import { EVENTOS_WEBHOOK } from '../compartido/eventos-webhook';
+import { enOrdenDelFormato } from '../compartido/eventos-webhook';
+import { FormatoEntrega } from '../evento/traductores/evento-interno';
 
 /**
  * La bandeja de salida (entrega): tomar las pendientes, anotar cada intento y dar de baja la
@@ -46,7 +47,9 @@ export class EntregaRepository {
       )
       SELECT r.id AS "id", r.suscripcion_id AS "suscripcionId", r.id_evento AS "eventId",
              ev.tipo AS "tipo", r.intentos::int AS "intentos", r.cuerpo AS "cuerpo",
-             s.url AS "url", s.secreto_cifrado AS "secretoCifrado", s.activo AS "suscripcionActiva"
+             s.url AS "url", s.secreto_cifrado AS "secretoCifrado", s.activo AS "suscripcionActiva",
+             s.formato AS "formato", ev.correlation_id AS "correlationId",
+             ev.traceparent AS "traceparent"
         FROM reclamadas r
         JOIN notificaciones.suscripcion s ON s.id = r.suscripcion_id
         JOIN notificaciones.evento ev     ON ev.id_evento = r.id_evento
@@ -84,6 +87,21 @@ export class EntregaRepository {
   }
 
   /**
+   * Cuántas entregas están PENDIENTE y desde cuándo espera la más vieja (null si no hay ninguna),
+   * para los gauges de /metrics. Una consulta sobre el índice parcial de PENDIENTE, con un plazo
+   * en la base (`statement_timeout` de esta transacción): si tarda más, falla en vez de colgar.
+   */
+  async resumenPendientes(plazoMs: number): Promise<{ pendientes: number; desde: Date | null }> {
+    const [, filas] = await this.prisma.db.$transaction([
+      this.prisma.db.$executeRaw`SELECT set_config('statement_timeout', ${String(plazoMs)}, true)`,
+      this.prisma.db.$queryRaw<Array<{ n: number; desde: Date | null }>>`
+        SELECT count(*)::int AS n, min(fecha_creacion) AS desde
+          FROM notificaciones.entrega WHERE estado = 'PENDIENTE'`,
+    ]);
+    return { pendientes: filas[0]?.n ?? 0, desde: filas[0]?.desde ?? null };
+  }
+
+  /**
    * Si las últimas `maximo` entregas ya resueltas de la suscripción (ENTREGADO o FALLIDO) son
    * todas FALLIDO, la da de baja (lógica) y lo audita sin actor (proceso interno), en la misma
    * transacción. Una entrega ENTREGADO corta la racha. Devuelve si la dio de baja.
@@ -104,6 +122,7 @@ export class EntregaRepository {
         select: {
           id_propietario: true,
           url: true,
+          formato: true,
           suscripcion_evento: { select: { tipo_evento: true } },
         },
       });
@@ -121,7 +140,7 @@ export class EntregaRepository {
           suscripcionId,
           idPropietario: suscripcion.id_propietario,
           url: suscripcion.url,
-          eventos: EVENTOS_WEBHOOK.filter((tipo) => tipos.includes(tipo)),
+          eventos: enOrdenDelFormato(tipos, suscripcion.formato === 'v2' ? 'v2' : 'v1'),
           motivo: 'FALLIDAS_SEGUIDAS',
         },
         ahora,
@@ -145,4 +164,10 @@ export interface EntregaReclamada {
   url: string;
   secretoCifrado: string;
   suscripcionActiva: boolean;
+  /** El de la suscripción: decide las cabeceras, la firma y los reintentos. */
+  formato: FormatoEntrega;
+  /** X-Correlation-Id del evento: va en la cabecera y en cada línea de log del intento. */
+  correlationId: string;
+  /** traceparent del span que recibió el evento: el span CLIENT del intento cuelga de él. */
+  traceparent: string | null;
 }

@@ -8,12 +8,23 @@ cambio (misma API, mismo cuerpo, misma firma).
 
 - **Suscripciones** (contrato GDS Flight Core API 1.5.0.0, idénticas al core):
   `GET`/`POST /flights/v1/webhooks` y `DELETE /flights/v1/webhooks/{id}`, scope `flights:webhooks`.
+- **Contrato de Vuelos v2** (RDA2, el de Booking Prototipo):
+  `GET`/`POST /api/v2/vuelos/webhooks` y `DELETE /api/v2/vuelos/webhooks/{id}` (los 15
+  `VuelosEventName`, entrega en **CloudEvents 1.0**) y el feed `GET /api/v2/vuelos/eventos`
+  (scope `flights:read`), con el `ProblemDetails` v2. Cada suscripción recibe el formato de la API
+  por la que se creó: las de v1 siguen recibiendo el `WebhookPayload` de siempre.
 - **Eventos** (solo el core): `POST /internal/v1/events`, scope `events:publish` con un token de
   cliente OAuth. Idempotente por `eventId`. Contrato versionado en
   [`docs/EVENTOS.md`](docs/EVENTOS.md), [`contracts/events/`](contracts/events/) y
   [`contracts/asyncapi.yaml`](contracts/asyncapi.yaml).
-- **Entrega**: un proceso cada 10 s, seguro con varias instancias; 5 intentos (1, 5, 30 y 120
-  minutos); `X-Webhook-Signature: sha256=` HMAC-SHA256 de `"timestamp.cuerpo"`.
+- **Entrega**: un proceso cada 10 s, seguro con varias instancias. v1: 5 intentos (1, 5, 30 y 120
+  minutos), `X-Webhook-Signature: sha256=` HMAC-SHA256 de `"timestamp.cuerpo"`. v2:
+  `application/cloudevents+json`, 6 intentos (1, 5, 30, 120 y 360 minutos), HMAC-SHA256 del cuerpo.
+  Las dos con `X-Correlation-Id` y nunca con `traceparent`.
+- **Correlación y observabilidad** (estándar de gateway_vuelos): `X-Correlation-Id` y `X-Trace-Id`
+  en cada respuesta, logs JSON con `requestId`, `correlationId`, `traceId` y `spanId`, trazas
+  OpenTelemetry que continúan la del relevo del core hasta cada entrega, y métricas Prometheus en
+  `METRICS_PORT` (9468 en local).
 - **Salud**: `GET /health` y `/health/ready`. **Documentación**: Swagger en `/api/docs`; el
   contrato en [`contracts/notifier-openapi.json`](contracts/notifier-openapi.json).
 
@@ -27,12 +38,17 @@ suscripciones del core en [`docs/MIGRACION.md`](docs/MIGRACION.md).
 
 ```text
 core ──POST /internal/v1/events──▶ notifier ──(una transacción)──▶ evento + una entrega PENDIENTE
-      token cliente events:publish            por cada suscripción activa del ownerId que escucha el tipo
+      token cliente events:publish            por cada suscripción activa del ownerId que escucha el tipo,
+      traceparent, X-Correlation-Id           con el cuerpo de su formato (Traductores: v1 o CloudEvent)
                                                    │
-                     EntregaWebhooks (cada 10 s, FOR UPDATE SKIP LOCKED, HTTP fuera de la transacción)
+                     EntregaWebhooks (cada 10 s, FOR UPDATE SKIP LOCKED, HTTP fuera de la transacción,
+                                      un span CLIENT por intento, hijo de la traza del evento)
                                                    ▼
-                     POST <url del tercero>  X-Webhook-Event, X-Webhook-Id, X-Webhook-Timestamp,
-                                             X-Webhook-Signature: sha256=HMAC(secreto, "ts.cuerpo")
+        v1: POST <url>  X-Webhook-Event, X-Webhook-Id, X-Webhook-Timestamp, X-Correlation-Id,
+                        X-Webhook-Signature: sha256=HMAC(secreto, "ts.cuerpo")
+        v2: POST <url>  Content-Type: application/cloudevents+json, X-Correlation-Id,
+                        X-Webhook-Signature: sha256=HMAC(secreto, cuerpo)
+        Booking: GET /api/v2/vuelos/eventos?after=<id>  (el respaldo: los mismos CloudEvents)
 ```
 
 ## Empezar en local
@@ -45,7 +61,8 @@ npm ci
 cp .env.example .env                    # completa WEBHOOK_SECRET_KEY (la del core si vas a migrar)
 docker compose up -d                    # PostgreSQL 18 en el puerto 5434
 ./db/reset.sh                           # esquema notificaciones
-npm run start:dev                       # http://localhost:3002
+./db/migrar.sh                          # si la base ya existía (fase 5a): la pone al día
+npm run start:dev                       # http://localhost:3002, métricas en :9468/metrics
 ```
 
 Un recorrido con `curl` (tokens de identity_vuelos):
@@ -72,6 +89,7 @@ curl -s -X POST $N/internal/v1/events -H "Authorization: Bearer $TOKEN_CORE" \
 | `npm run lint`, `format:check`, `typecheck` | Calidad (lo mismo que CI) |
 | `npm test` | Suite e2e contra PostgreSQL (la base del `.env` o `DATABASE_URL`) |
 | `npm run test:mutaciones` | Rompe el código a propósito (33 mutaciones) y exige que alguna prueba falle |
+| `./db/migrar.sh` | Aplica `db/migraciones/*.sql` (idempotentes) a una base que ya existe |
 | `npm run eventos:breaking` | Compara `contracts/events` con `origin/main` y falla ante un cambio incompatible |
 | `npm run suscripciones:importar -- <archivo>` | Importa las suscripciones exportadas por el core (idempotente) |
 | `npm run openapi:export` | Regenera `contracts/notifier-openapi.json` |
@@ -82,17 +100,19 @@ curl -s -X POST $N/internal/v1/events -H "Authorization: Bearer $TOKEN_CORE" \
 ```text
 src/
   modules/
-    suscripcion/     /flights/v1/webhooks y la importación de las del core
-    evento/          /internal/v1/events; contrato/: esquemas versionados y compatibilidad
+    suscripcion/     /flights/v1/webhooks, v2/ (/api/v2/vuelos/webhooks) y la importación del core
+    evento/          /internal/v1/events; contrato/: esquemas versionados y compatibilidad;
+                     traductores/: WebhookPayload v1 y CloudEvent v2; v2/: el feed /api/v2/vuelos/eventos
     entrega/         el proceso de entrega y el HTTP (SSRF al conectar, 5 s, sin redirecciones)
     compartido/      cifrado del secreto, firma, SSRF y los 12 tipos de evento
     auditoria/       altas y bajas de suscripciones (sin secretos ni URL)
     auth/            verificador de tokens por JWKS (el de la fase 4b del core) y scopes
     salud/           /health y /health/ready
-  common/            contexto y X-Request-Id, errores, logs JSON, límites, guards
+  observabilidad/    trazas (OpenTelemetry) y métricas (prom-client): el estándar del gateway
+  common/            contexto, X-Request-Id y X-Correlation-Id, errores (ProblemDetails v1 y v2), logs JSON, límites, guards
   config/            entorno validado, seguridad HTTP, Swagger
   cli/               suscripciones:importar, eventos:breaking, openapi:export
 contracts/           events/<tipo>.v1.json, asyncapi.yaml, notifier-openapi.json
-db/                  esquema_notificaciones.sql, reset.sh
-test/                e2e (identidad y receptor falsos, ataques, concurrencia, escaneo...)
+db/                  esquema_notificaciones.sql, reset.sh, migrar.sh y migraciones/
+test/                e2e (identidad, receptor y recolector OTLP falsos, contrato v2, ataques, concurrencia, escaneo...)
 ```

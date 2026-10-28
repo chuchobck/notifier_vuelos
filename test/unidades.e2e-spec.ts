@@ -11,7 +11,7 @@ import {
   direccionProhibida,
   motivoDestinoInvalido,
 } from '../src/modules/compartido/destino-permitido';
-import { EVENTOS_WEBHOOK, enmascarar } from '../src/modules/compartido/eventos-webhook';
+import { EVENTOS, enmascarar } from '../src/modules/compartido/eventos-webhook';
 import { firmar, firmaValida } from '../src/modules/compartido/firma-webhook';
 import { ClienteWebhookHttp, REGLAS_ENVIO } from '../src/modules/entrega/cliente-webhook-http';
 import { proximoIntentoTras, REGLAS_ENTREGA } from '../src/modules/entrega/entrega-webhooks';
@@ -371,15 +371,26 @@ describe('esquemas de eventos', () => {
     JSON.parse(readFileSync(join(CARPETA_ESQUEMAS, nombre), 'utf8')) as Esquema;
   const registro = new RegistroEsquemas();
 
-  it('los 12 tipos tienen su v1, y el ejemplo de cada esquema es válido', () => {
-    for (const tipo of EVENTOS_WEBHOOK) {
-      expect(registro.versionesDe(tipo)).toEqual(['1.0']);
-      expect(registro.validar(ejemplo(tipo)).valido).toBe(true);
+  it('los 15 tipos tienen su v1 (1.0 y 1.1), y cada ejemplo de cada esquema es válido', () => {
+    for (const tipo of EVENTOS) {
+      expect(registro.versionesDe(tipo)).toEqual(['1.0', '1.1']);
+      const ejemplos = (leer(`${tipo}.v1.json`) as { examples: unknown[] }).examples;
+      expect(ejemplos.length).toBeGreaterThan(0);
+      for (const ejemplo of ejemplos)
+        expect(registro.validar(ejemplo)).toMatchObject({ valido: true });
+    }
+  });
+
+  it('correlationId es opcional en cualquier 1.x y con el formato del core', () => {
+    const conId = { ...ejemplo('booking.confirmed'), correlationId: 'corr-vuelos-7f3a9c' };
+    expect(registro.validar(conId).valido).toBe(true);
+    for (const malo of ['', 'con espacio', 'x'.repeat(101), 'salto\nde-linea']) {
+      expect(registro.validar({ ...conId, correlationId: malo }).valido).toBe(false);
     }
   });
 
   it('cada archivo cumple las reglas de forma', () => {
-    for (const tipo of EVENTOS_WEBHOOK) {
+    for (const tipo of EVENTOS) {
       expect(problemasDeArchivo(`${tipo}.v1.json`, leer(`${tipo}.v1.json`))).toEqual([]);
     }
   });
@@ -514,7 +525,7 @@ describe('esquemas de eventos', () => {
       expect(compararCarpetas(base(), conV2).incompatible).toBe(false);
     });
 
-    it('un archivo mal formado no pasa: tipo que no es de los 12, eventType distinto del nombre', () => {
+    it('un archivo mal formado no pasa: tipo que no es de los 15, eventType distinto del nombre', () => {
       const actuales = base();
       actuales.set('booking.created.v1.json', leer('booking.confirmed.v1.json'));
       expect(compararCarpetas(base(), actuales).problemas.length).toBeGreaterThan(0);
@@ -560,7 +571,7 @@ describe('esquemas de eventos', () => {
       v2.properties.data.required.push('reason');
       writeFileSync(join(carpeta, 'hold.expired.v2.json'), JSON.stringify(v2));
       const conV2 = new RegistroEsquemas(carpeta);
-      expect(conV2.versionesDe('hold.expired')).toEqual(['1.0', '2.0']);
+      expect(conV2.versionesDe('hold.expired')).toEqual(['1.0', '1.1', '2.0']);
       const v1 = ejemplo('hold.expired');
       expect(conV2.validar(v1).valido).toBe(true);
       expect(conV2.validar({ ...v1, schemaVersion: '2.0' }).valido).toBe(false);
@@ -574,10 +585,10 @@ describe('esquemas de eventos', () => {
     });
   });
 
-  it('contracts/asyncapi.yaml nombra los 12 mensajes y cada esquema que referencia existe', () => {
+  it('contracts/asyncapi.yaml nombra los 15 mensajes y cada esquema que referencia existe', () => {
     const asyncapi = readFileSync(join(CARPETA_ESQUEMAS, '..', 'asyncapi.yaml'), 'utf8');
     const referencias = [...asyncapi.matchAll(/\$ref: '\.\/events\/([^']+)'/g)].map((m) => m[1]);
-    expect(referencias.sort()).toEqual(EVENTOS_WEBHOOK.map((t) => `${t}.v1.json`).sort());
+    expect(referencias.sort()).toEqual(EVENTOS.map((t) => `${t}.v1.json`).sort());
     for (const archivo of referencias) expect(() => leer(archivo)).not.toThrow();
   });
 });

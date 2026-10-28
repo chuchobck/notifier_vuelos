@@ -3,19 +3,23 @@
 # Describe los dos canales del servicio:
 #   - eventos: el core publica cada hecho con POST /internal/v1/events (el sobre versionado de
 #     contracts/events/<tipo>.v<mayor>.json), con un token de cliente OAuth con events:publish.
-#   - webhook: el notifier entrega el WebhookPayload del contrato GDS Flight Core API 1.5.0.0 a la
-#     URL de cada suscripción, firmado con HMAC-SHA256 (X-Webhook-Signature).
+#   - webhook: el notifier entrega a la URL de cada suscripción, firmado con HMAC-SHA256
+#     (X-Webhook-Signature), el WebhookPayload del contrato GDS Flight Core API 1.5.0.0 (las
+#     suscripciones de /flights/v1/webhooks) o un CloudEvent 1.0 estructurado (las de
+#     /api/v2/vuelos/webhooks, contrato de Vuelos v2).
 # Las reglas de versionado y compatibilidad están en docs/EVENTOS.md. El CI lo valida con el CLI
 # de AsyncAPI.
 asyncapi: 3.0.0
 info:
   title: Quinde · Eventos de vuelos
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Eventos del sistema de vuelos Quinde. El core (backend_vuelos) publica cada hecho de negocio en
     Quinde · Notifier, que lo guarda una sola vez por eventId y lo entrega a las suscripciones
-    activas del dueño (ownerId) que escuchan ese tipo, con reintentos (1, 5, 30 y 120 minutos; 5
-    intentos). La entrega es al menos una vez: el receptor descarta duplicados por X-Webhook-Id.
+    activas del dueño (ownerId) que escuchan ese tipo, en el formato de cada suscripción: el
+    WebhookPayload v1 (reintentos a 1, 5, 30 y 120 minutos; 5 intentos) o un CloudEvent v2
+    (reintentos a 1, 5, 30, 120 y 360 minutos; 6 intentos). La entrega es al menos una vez: el
+    receptor descarta duplicados por X-Webhook-Id (v1) o por el id del CloudEvent (v2).
 servers:
   notifier:
     host: notifier.quinde.example
@@ -30,12 +34,19 @@ channels:
     title: Publicación de eventos del core
     description: |
       POST /internal/v1/events con el sobre { eventId, eventType, schemaVersion, occurredAt, ownerId,
-      data }. 202 la primera vez (guardado y repartido, después del commit), 200 si el eventId ya
+      correlationId (opcional), data }. La cabecera X-Correlation-Id de la publicación se usa si el
+      sobre no trae correlationId. 202 la primera vez (guardado y repartido, después del commit), 200 si el eventId ya
       existía con el mismo contenido, 409 si existía con otro, 422 con un eventType o un
       schemaVersion desconocidos y 400 si no cumple el esquema.
     servers:
       - $ref: '#/servers/notifier'
     messages:
+      holdCreated:
+        $ref: '#/components/messages/holdCreated'
+      bookingSeatChanged:
+        $ref: '#/components/messages/bookingSeatChanged'
+      flightStatusChanged:
+        $ref: '#/components/messages/flightStatusChanged'
       bookingConfirmed:
         $ref: '#/components/messages/bookingConfirmed'
       bookingFailed:
@@ -64,12 +75,15 @@ channels:
     address: null
     title: Entrega a un suscriptor
     description: |
-      POST a la URL de cada suscripción (registrada con POST /flights/v1/webhooks; la URL la elige el
-      tercero, por eso la dirección no es fija). Un 2xx cierra la entrega; cualquier otra cosa, un
-      error de red o 5 s sin respuesta se reintenta. No se siguen redirecciones.
+      POST a la URL de cada suscripción (registrada con POST /flights/v1/webhooks o
+      /api/v2/vuelos/webhooks; la URL la elige el tercero, por eso la dirección no es fija). Un 2xx
+      cierra la entrega; cualquier otra cosa, un error de red o 5 s sin respuesta se reintenta. No
+      se siguen redirecciones ni se manda traceparent.
     messages:
       webhookPayload:
         $ref: '#/components/messages/webhookPayload'
+      cloudEvent:
+        $ref: '#/components/messages/cloudEvent'
 operations:
   recibirEvento:
     action: receive
@@ -83,6 +97,9 @@ operations:
         method: POST
         bindingVersion: 0.3.0
     messages:
+      - $ref: '#/channels/eventos/messages/holdCreated'
+      - $ref: '#/channels/eventos/messages/bookingSeatChanged'
+      - $ref: '#/channels/eventos/messages/flightStatusChanged'
       - $ref: '#/channels/eventos/messages/bookingConfirmed'
       - $ref: '#/channels/eventos/messages/bookingFailed'
       - $ref: '#/channels/eventos/messages/bookingChanged'
@@ -106,6 +123,7 @@ operations:
         bindingVersion: 0.3.0
     messages:
       - $ref: '#/channels/webhook/messages/webhookPayload'
+      - $ref: '#/channels/webhook/messages/cloudEvent'
 components:
   securitySchemes:
     clienteOAuth:
@@ -121,6 +139,33 @@ components:
       scopes:
         - events:publish
   messages:
+    holdCreated:
+      name: hold.created
+      title: hold.created (v1)
+      summary: 'Se bloquearon asientos. Solo lo reciben las suscripciones v2.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/hold.created.v1.json'
+    bookingSeatChanged:
+      name: booking.seat_changed
+      title: booking.seat_changed (v1)
+      summary: 'Se cambió el asiento de un pasajero. Solo lo reciben las suscripciones v2.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/booking.seat_changed.v1.json'
+    flightStatusChanged:
+      name: flight.status_changed
+      title: flight.status_changed (v1)
+      summary: 'Cambió el estado operativo de un vuelo. Solo lo reciben las suscripciones v2.'
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: './events/flight.status_changed.v1.json'
     bookingConfirmed:
       name: booking.confirmed
       title: booking.confirmed (v1)
@@ -241,7 +286,12 @@ components:
           - X-Webhook-Id
           - X-Webhook-Timestamp
           - X-Webhook-Signature
+          - X-Correlation-Id
         properties:
+          X-Correlation-Id:
+            type: string
+            pattern: '^[A-Za-z0-9._:-]{1,100}$'
+            description: El X-Correlation-Id del proceso que originó el hecho (fuera de la firma).
           X-Webhook-Event:
             type: string
             description: El eventType.
@@ -294,6 +344,76 @@ components:
             enum:
               - 1.5.0
             description: info.version del contrato del core sin el cuarto número.
+          data:
+            type: object
+            description: El data del sobre, tal como lo validó el esquema de su tipo.
+    cloudEvent:
+      name: CloudEvent
+      title: VuelosCloudEvent del contrato de Vuelos v2 (CloudEvents 1.0, modo estructurado)
+      summary: 'Lo que recibe una suscripción v2. El data es el del sobre que publicó el core.'
+      contentType: application/cloudevents+json
+      headers:
+        type: object
+        required:
+          - X-Webhook-Signature
+          - X-Correlation-Id
+        properties:
+          X-Webhook-Signature:
+            type: string
+            pattern: '^sha256=[0-9a-f]{64}$'
+            description: |
+              sha256= y el HMAC-SHA256 en hexadecimal del cuerpo, con el secreto de la suscripción
+              (el contrato v2: HMAC-SHA256(secret, body)). Hexadecimal y sin timestamp: pendiente de
+              confirmar con el docente (docs/EVENTOS.md).
+          X-Correlation-Id:
+            type: string
+            pattern: '^[A-Za-z0-9._:-]{1,100}$'
+            description: El mismo valor del atributo correlationid del CloudEvent.
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - specversion
+          - type
+          - source
+          - id
+          - time
+          - subject
+          - datacontenttype
+          - correlationid
+          - data
+        properties:
+          specversion:
+            type: string
+            enum:
+              - '1.0'
+          type:
+            type: string
+            pattern: '^ec\.edu\.epn\.booking\.vuelos\.[a-z]+\.[a-z_]+$'
+            description: ec.edu.epn.booking.vuelos.<eventType> (uno de los 15 VuelosEventName).
+          source:
+            type: string
+            pattern: '^/aerolineas/[A-Za-z0-9-]+/vuelos$'
+            description: /aerolineas/<AIRLINE_CODE>/vuelos.
+          id:
+            type: string
+            format: uuid
+            description: El eventId. El mismo en cada reintento y en el feed; sirve para deduplicar.
+          time:
+            type: string
+            format: date-time
+            description: El occurredAt del sobre, en UTC con milisegundos.
+          subject:
+            type: string
+            description: El bookingId, el holdId o <flightNumber>/<date> (flight.status_changed).
+          datacontenttype:
+            type: string
+            enum:
+              - application/json
+          correlationid:
+            type: string
+            pattern: '^[A-Za-z0-9._:-]{1,100}$'
+            description: Extensión CloudEvents con el X-Correlation-Id del proceso del hecho.
           data:
             type: object
             description: El data del sobre, tal como lo validó el esquema de su tipo.

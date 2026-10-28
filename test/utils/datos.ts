@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as request from 'supertest';
-import { EventoWebhook } from '../../src/modules/compartido/eventos-webhook';
+import { EventoWebhook, TipoEvento } from '../../src/modules/compartido/eventos-webhook';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { IdentidadFalsa } from './identidad-falsa';
 
@@ -50,6 +50,25 @@ export class Datos {
     return { id: (respuesta.body as { id: string }).id, secreto };
   }
 
+  /** Registra una suscripción v2 (POST /api/v2/vuelos/webhooks) y devuelve su id. */
+  async suscribirV2(
+    dueno: string,
+    url: string,
+    eventos: TipoEvento[],
+    secreto = `secreto-e2e-${randomUUID()}`,
+  ): Promise<{ id: string; secreto: string }> {
+    const respuesta = await request(this.app.getHttpServer())
+      .post('/api/v2/vuelos/webhooks')
+      .set('Authorization', `Bearer ${this.tokenDe(dueno)}`)
+      .send({ url, events: eventos, secret: secreto });
+    if (respuesta.status !== 201) {
+      throw new Error(
+        `No se pudo suscribir (v2): ${respuesta.status} ${JSON.stringify(respuesta.body)}`,
+      );
+    }
+    return { id: (respuesta.body as { id: string }).id, secreto };
+  }
+
   /** POST /internal/v1/events con el token del core. */
   publicar(cuerpo: unknown, token = this.identidad.firmarPublicador()) {
     return request(this.app.getHttpServer())
@@ -68,17 +87,20 @@ export class Datos {
   }
 }
 
-/** El ejemplo del esquema de un tipo (contracts/events/<tipo>.v1.json). */
-export function ejemplo(tipo: EventoWebhook): Record<string, unknown> {
+/**
+ * Un ejemplo del esquema de un tipo (contracts/events/<tipo>.v1.json): el primero (1.0) por
+ * defecto; `indice` 1 es el de 1.1 (con correlationId y la data ampliada) en los 12 tipos de v1.
+ */
+export function ejemplo(tipo: TipoEvento, indice = 0): Record<string, unknown> {
   const esquema = JSON.parse(
     readFileSync(join(__dirname, '..', '..', 'contracts', 'events', `${tipo}.v1.json`), 'utf8'),
   ) as { examples: Array<Record<string, unknown>> };
-  return structuredClone(esquema.examples[0]);
+  return structuredClone(esquema.examples[indice]);
 }
 
 /** Un sobre válido de ese tipo para ese dueño, con un eventId nuevo. */
 export function sobre(
-  tipo: EventoWebhook,
+  tipo: TipoEvento,
   dueno: string,
   cambios: Record<string, unknown> = {},
 ): Record<string, unknown> {

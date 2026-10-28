@@ -81,7 +81,7 @@ describe('Transversal', () => {
         .map((l) => JSON.parse(l) as Record<string, unknown>)
         .find((l) => l.requestId === 'traza-del-error-1234' && l.context === 'HTTP');
       expect(linea?.message).toBe(
-        `GET /no-existe 404 ${(linea?.message as string).split(' ')[3]} ip=127.0.0.1`,
+        `GET __unmatched__ 404 ${(linea?.message as string).split(' ')[3]}`,
       );
     });
   });

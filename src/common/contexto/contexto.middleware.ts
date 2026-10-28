@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
+import { plantillaDeRuta, SIN_PLANTILLA } from '../../observabilidad/plantilla-ruta';
 import { ContextoPeticion, ejecutarEnContexto, normalizarIp } from './contexto-peticion';
+import { CABECERA_CORRELACION, resolverCorrelationId } from './correlation-id';
 import { CABECERA_REQUEST_ID, resolverRequestId } from './request-id';
 
 const logger = new Logger('HTTP');
@@ -16,22 +18,27 @@ export function contextoDeLaPeticion(peticion: Request): ContextoPeticion | unde
 }
 
 /**
- * Primer middleware de la app. Asigna el X-Request-Id y lo devuelve en la respuesta; como va
- * antes que helmet, CORS y el parser del cuerpo, también lo llevan los errores que esos
- * producen (413, JSON roto). Al terminar la respuesta deja una línea de log de acceso.
+ * El contexto de la petición, creado la primera vez que se pide (con su X-Request-Id, su
+ * X-Correlation-Id y su línea de acceso al terminar) y reusado después. Lo piden el middleware de
+ * observabilidad, que va primero (necesita el request id para su span), y `middlewareRequestId`:
+ * un solo id por petición.
  *
- * La línea de acceso lleva método, ruta SIN la query (un `?token=` no llega al log), status,
- * duración, IP, el uuid de quien llama y, si es un cliente OAuth, su client_id. Nunca cabeceras
- * ni cuerpo: ahí viajan los tokens, los secretos de los webhooks y sus URL.
+ * La línea de acceso sigue el estándar de observabilidad: método, PLANTILLA de la ruta (nunca la
+ * pedida: ni un id ni un `?token=` llegan al log), status, duración y, si es un cliente OAuth, su
+ * client_id. Sin IP, sin el uuid de quien llama, sin cabeceras ni cuerpo.
  */
-export function middlewareRequestId(peticion: Request, respuesta: Response, next: NextFunction) {
+export function asegurarContexto(peticion: Request, respuesta: Response): ContextoPeticion {
+  const existente = contextoDeLaPeticion(peticion);
+  if (existente) return existente;
   const contexto: ContextoPeticion = {
     requestId: resolverRequestId(peticion.headers['x-request-id']),
+    correlationId: resolverCorrelationId(peticion.headers['x-correlation-id']),
     ip: normalizarIp(peticion.ip),
     usuario: null,
   };
   (peticion as PeticionConContexto)[CONTEXTO_EN_PETICION] = contexto;
   respuesta.setHeader(CABECERA_REQUEST_ID, contexto.requestId);
+  respuesta.setHeader(CABECERA_CORRELACION, contexto.correlationId);
 
   const inicio = process.hrtime.bigint();
   respuesta.on('finish', () => {
@@ -40,20 +47,28 @@ export function middlewareRequestId(peticion: Request, respuesta: Response, next
     // se vuelve a entrar para que el logger vea el id.
     ejecutarEnContexto(contexto, () =>
       logger.log(
-        `${peticion.method} ${peticion.originalUrl.split('?')[0]} ${respuesta.statusCode} ` +
-          `${ms.toFixed(1)}ms ip=${contexto.ip ?? '-'}` +
-          `${contexto.usuario ? ` sub=${contexto.usuario}` : ''}` +
-          `${contexto.cliente ? ` client=${contexto.cliente}` : ''}`,
+        `${peticion.method} ${plantillaDeRuta(peticion) ?? SIN_PLANTILLA} ${respuesta.statusCode} ` +
+          `${ms.toFixed(1)}ms${contexto.cliente ? ` client=${contexto.cliente}` : ''}`,
       ),
     );
   });
+  return contexto;
+}
+
+/**
+ * Asigna el X-Request-Id (si el middleware de observabilidad no lo hizo ya) y lo devuelve en la
+ * respuesta; como va antes que helmet, CORS y el parser del cuerpo, también lo llevan los errores
+ * que esos producen (413, JSON roto).
+ */
+export function middlewareRequestId(peticion: Request, respuesta: Response, next: NextFunction) {
+  asegurarContexto(peticion, respuesta);
   next();
 }
 
 /**
- * Segundo middleware: abre el contexto asíncrono (AsyncLocalStorage) con el mismo objeto.
- * Va DESPUÉS del parser del cuerpo: los eventos de la petición que el parser escucha se
- * emiten fuera del contexto y, si el contexto se abriera antes, el parser lo perdería.
+ * Abre el contexto asíncrono (AsyncLocalStorage) con el mismo objeto. Va DESPUÉS del parser del
+ * cuerpo: los eventos de la petición que el parser escucha se emiten fuera del contexto y, si el
+ * contexto se abriera antes, el parser lo perdería.
  */
 export function middlewareContexto(peticion: Request, _respuesta: Response, next: NextFunction) {
   const contexto = contextoDeLaPeticion(peticion);

@@ -1,7 +1,9 @@
 import { Routes } from '@nestjs/core';
 import { eventoRoutes } from '../modules/evento/evento.routes';
+import { eventoV2Routes } from '../modules/evento/v2/evento.v2.routes';
 import { saludRoutes } from '../modules/salud/salud.routes';
 import { suscripcionRoutes } from '../modules/suscripcion/suscripcion.routes';
+import { suscripcionV2Routes } from '../modules/suscripcion/v2/suscripcion.v2.routes';
 
 /**
  * Única tabla de rutas del servicio. Junta los *.routes.ts de cada módulo; los controllers
@@ -9,12 +11,20 @@ import { suscripcionRoutes } from '../modules/suscripcion/suscripcion.routes';
  *
  *   /health, /health/ready        salud (sin versión: la sondea el orquestador)
  *   /flights/v1/webhooks          suscripciones, la misma ruta que en el core (contrato 1.5.0.0)
+ *   /api/v2/vuelos/webhooks       suscripciones del contrato de Vuelos v2 (entrega CloudEvents)
+ *   /api/v2/vuelos/eventos        feed de eventos del contrato de Vuelos v2 (CloudEvents)
  *   /internal/v1/events           publicación de eventos (solo el core)
  */
-export const rutas: Routes = [...saludRoutes, ...suscripcionRoutes, ...eventoRoutes];
+export const rutas: Routes = [
+  ...saludRoutes,
+  ...suscripcionRoutes,
+  ...suscripcionV2Routes,
+  ...eventoV2Routes,
+  ...eventoRoutes,
+];
 
 /**
  * Rutas cuyas respuestas no se guardan en ninguna caché: llevan la URL de un tercero o son de
  * la API interna.
  */
-export const RUTAS_SIN_CACHE: string[] = ['/flights/v1/webhooks', '/internal/'];
+export const RUTAS_SIN_CACHE: string[] = ['/flights/v1/webhooks', '/api/v2/vuelos/', '/internal/'];

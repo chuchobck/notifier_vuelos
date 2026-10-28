@@ -7,6 +7,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export interface ContextoPeticion {
   /** X-Request-Id: el que mandó el cliente si tenía un formato válido, o uno generado. */
   requestId: string;
+  /**
+   * X-Correlation-Id (contrato v2, §6): el proceso de negocio completo. El que llegó, sin cambios,
+   * si tiene formato válido; si no, `corr-<uuid>`. Vuelve en cada respuesta y va en cada log.
+   */
+  correlationId: string;
   /** IP del cliente (con `trust proxy` configurado, la de X-Forwarded-For). */
   ip: string | null;
   /**
@@ -20,6 +25,11 @@ export interface ContextoPeticion {
    * auditoría ya lo identifica; esto es su código legible, que va a la línea de acceso.
    */
   cliente?: string;
+  /**
+   * El span SERVER de la petición (lo pone el middleware de observabilidad), para las líneas que se
+   * escriben fuera del contexto de OpenTelemetry (la de acceso, al terminar la respuesta).
+   */
+  traza?: { traceId: string; spanId: string };
 }
 
 const almacen = new AsyncLocalStorage<ContextoPeticion>();

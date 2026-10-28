@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { EVENTOS_WEBHOOK } from '../../compartido/eventos-webhook';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { EVENTOS } from '../../compartido/eventos-webhook';
 
 /**
  * El sobre que publica el core, solo para la documentación: lo valida el JSON Schema de su tipo
@@ -9,7 +9,7 @@ export class SobreEventoDto {
   @ApiProperty({ format: 'uuid', description: 'Id del hecho; la clave de idempotencia' })
   eventId!: string;
 
-  @ApiProperty({ enum: EVENTOS_WEBHOOK, example: 'booking.confirmed' })
+  @ApiProperty({ enum: EVENTOS, example: 'booking.confirmed' })
   eventType!: string;
 
   @ApiProperty({
@@ -32,6 +32,16 @@ export class SobreEventoDto {
       'Dueño del hecho (sub del token que creó el recurso): solo sus suscripciones lo reciben',
   })
   ownerId!: string;
+
+  @ApiPropertyOptional({
+    example: 'corr-vuelos-7f3a9c',
+    pattern: '^[A-Za-z0-9._:-]{1,100}$',
+    description:
+      'X-Correlation-Id del proceso que originó el hecho, sin cambios (desde 1.1, aceptado en ' +
+      'cualquier 1.x). Va al CloudEvent (correlationid) y a la cabecera de cada entrega. Sin él, ' +
+      'el de la cabecera X-Correlation-Id de esta publicación (o uno generado)',
+  })
+  correlationId?: string;
 
   @ApiProperty({
     type: 'object',

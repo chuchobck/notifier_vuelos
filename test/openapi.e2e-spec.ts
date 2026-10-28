@@ -35,6 +35,9 @@ describe('Contrato OpenAPI versionado', () => {
 
   it('documenta las rutas del servicio y nada más', () => {
     expect(Object.keys(versionado().paths).sort()).toEqual([
+      '/api/v2/vuelos/eventos',
+      '/api/v2/vuelos/webhooks',
+      '/api/v2/vuelos/webhooks/{id}',
       '/flights/v1/webhooks',
       '/flights/v1/webhooks/{id}',
       '/health',

@@ -1,4 +1,4 @@
-import { EVENTOS_WEBHOOK } from '../../compartido/eventos-webhook';
+import { EVENTOS } from '../../compartido/eventos-webhook';
 
 /**
  * Reglas de compatibilidad de los esquemas de eventos (contracts/events/<tipo>.v<mayor>.json),
@@ -132,7 +132,7 @@ function compararPropiedades(antes: Esquema, despues: Esquema, ruta: string): Ca
 
 /**
  * Lo que tiene que cumplir un archivo de contracts/events por sí solo: nombre `<tipo>.v<mayor>.json`,
- * un tipo de los 12 del contrato, un `$id` que termina en ese nombre, `eventType` con ese único
+ * un tipo de los 15 del contrato v2, un `$id` que termina en ese nombre, `eventType` con ese único
  * valor, versiones `<mayor>.<menor>` de ese mayor, y el sobre completo (los seis campos
  * obligatorios, sin campos de más).
  */
@@ -141,8 +141,8 @@ export function problemasDeArchivo(nombre: string, esquema: unknown): string[] {
   if (!partes) return [`${nombre}: el nombre debe ser <tipo>.v<mayor>.json`];
   const [, tipo, mayor] = partes;
   const problemas: string[] = [];
-  if (!(EVENTOS_WEBHOOK as readonly string[]).includes(tipo)) {
-    problemas.push(`${nombre}: ${tipo} no es uno de los 12 tipos de evento del contrato`);
+  if (!(EVENTOS as readonly string[]).includes(tipo)) {
+    problemas.push(`${nombre}: ${tipo} no es uno de los 15 tipos de evento del contrato v2`);
   }
   if (!esObjeto(esquema)) return [...problemas, `${nombre}: no es un objeto JSON`];
   // Al copiar la v1 para hacer la v2 es fácil olvidarlo, y dos archivos con el mismo $id chocan

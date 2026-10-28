@@ -3,7 +3,7 @@ import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 
 export const RUTA_SWAGGER = 'api/docs';
 /** Versión del servicio (la de package.json). */
-export const VERSION_SERVICIO = '0.1.0';
+export const VERSION_SERVICIO = '0.2.0';
 const TITULO = 'Quinde · Notifier';
 
 /** Nombre del esquema bearer de Swagger (el del botón Authorize). */
@@ -12,6 +12,8 @@ export const ESQUEMA_BEARER = 'bearer';
 /** Etiquetas de Swagger, en el orden en que se muestran. `Webhooks` es la del contrato del core. */
 export const ETIQUETAS = {
   webhooks: 'Webhooks',
+  webhooksV2: 'MS.Clientes — Webhooks (v2)',
+  feedV2: 'MS.Vuelos — Telemetría (v2)',
   eventos: 'Eventos internos',
   salud: 'Salud',
 } as const;
@@ -19,6 +21,10 @@ export const ETIQUETAS = {
 const DESCRIPCIONES: Record<keyof typeof ETIQUETAS, string> = {
   webhooks:
     'Suscripciones a webhooks del usuario del token, idénticas a /webhooks del contrato GDS Flight Core API 1.5.0.0 (scope flights:webhooks).',
+  webhooksV2:
+    'Suscripciones del contrato de Vuelos v2 (/api/v2/vuelos/webhooks, scope flights:webhooks): las mismas reglas que v1, los 15 VuelosEventName y la entrega en CloudEvents 1.0.',
+  feedV2:
+    'Feed de eventos del contrato de Vuelos v2 (GET /api/v2/vuelos/eventos, scope flights:read): los CloudEvents del dueño del token, respaldo de los webhooks.',
   eventos:
     'Por donde el core publica sus eventos (scope events:publish, solo clientes OAuth). Contrato del sobre: contracts/events/ y contracts/asyncapi.yaml.',
   salud: 'Chequeo de vida y de disponibilidad.',

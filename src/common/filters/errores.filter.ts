@@ -5,7 +5,10 @@ import { ejecutarEnContexto, obtenerContexto } from '../contexto/contexto-petici
 import { contextoDeLaPeticion } from '../contexto/contexto.middleware';
 import { ErrorNegocio } from '../errores/error-negocio';
 import { CONTENT_TYPE_PROBLEMA } from '../errores/problem-details';
+import { aProblemDetailsV2, PREFIJO_RUTAS_V2 } from '../errores/problem-details-v2';
+import { correlacionActual, nuevoCorrelationId } from '../contexto/correlation-id';
 import { traducirExcepcion } from '../errores/traducir-excepcion';
+import { plantillaDeRuta, SIN_PLANTILLA } from '../../observabilidad/plantilla-ruta';
 
 /** Forma mínima de la capa de ruta de Express, que no tiene tipos públicos. */
 interface CapaExpress {
@@ -16,7 +19,9 @@ interface CapaExpress {
 /**
  * Filtro global: todo error sale como `application/problem+json` (RFC 9457), sea de una
  * excepción de Nest, de una regla de negocio, de una ruta inexistente o de un fallo que nadie
- * previó. El stack de un 5xx queda en el log; al cliente nunca le llega.
+ * previó. El stack de un 5xx queda en el log; al cliente nunca le llega. En /api/v2/** sale el
+ * ProblemDetails del contrato v2 (con instance, correlation_id, timestamp y su enum de code); en
+ * lo demás, el de v1 sin cambios.
  */
 @Catch()
 export class ErroresFilter implements ExceptionFilter {
@@ -30,6 +35,8 @@ export class ErroresFilter implements ExceptionFilter {
     const peticion = host.switchToHttp().getRequest<Request>();
     const respuesta = host.switchToHttp().getResponse<Response>();
     const ruta = peticion.originalUrl.split('?')[0].slice(0, 200);
+    // Al log va la plantilla, como en la línea de acceso: ni ids ni nada que venga en la URL
+    const plantilla = plantillaDeRuta(peticion) ?? SIN_PLANTILLA;
 
     // Un error del parser del cuerpo llega antes de abrir el contexto asíncrono: el id se toma
     // de la petición para que su línea de log lo lleve igual.
@@ -48,14 +55,14 @@ export class ErroresFilter implements ExceptionFilter {
     registrar(() => {
       if (esErrorInterno) {
         this.logger.error(
-          `${peticion.method} ${ruta} → ${problema.status}`,
+          `${peticion.method} ${plantilla} → ${problema.status}`,
           describirParaLog(causa),
         );
       } else {
         const origen =
           causa instanceof Error && !(causa instanceof ErrorNegocio) ? ` (${resumir(causa)})` : '';
         this.logger.debug(
-          `${peticion.method} ${ruta} → ${problema.status} ${problema.code}${origen}`,
+          `${peticion.method} ${plantilla} → ${problema.status} ${problema.code}${origen}`,
         );
       }
     });
@@ -65,10 +72,18 @@ export class ErroresFilter implements ExceptionFilter {
       return;
     }
     for (const [nombre, valor] of Object.entries(cabeceras)) respuesta.setHeader(nombre, valor);
+    const cuerpo = ruta.startsWith(PREFIJO_RUTAS_V2)
+      ? aProblemDetailsV2(
+          problema,
+          ruta,
+          contexto?.correlationId ?? correlacionActual() ?? nuevoCorrelationId(),
+          new Date(),
+        )
+      : problema;
     respuesta
       .status(problema.status)
       .setHeader('Content-Type', CONTENT_TYPE_PROBLEMA)
-      .send(JSON.stringify(problema));
+      .send(JSON.stringify(cuerpo));
   }
 
   /** Métodos con los que existe la ruta pedida; vacío si la ruta no existe con ninguno. */

@@ -3,9 +3,12 @@
 -- -----------------------------------------------------------------------------
 --  Motor objetivo : PostgreSQL 18 (corre sin cambios en 16 y 17)
 --  Alcance        : suscripciones a webhooks (/flights/v1/webhooks del contrato
---                   GDS Flight Core API v1.5.0.0), los eventos que publica el
---                   core, la bandeja de salida de las entregas y la auditoría
---                   de altas y bajas de suscripción.
+--                   GDS Flight Core API v1.5.0.0 y /api/v2/vuelos/webhooks del
+--                   contrato de Vuelos v2), los eventos que publica el core, la
+--                   bandeja de salida de las entregas y la auditoría de altas y
+--                   bajas de suscripción.
+--  Una base que ya existe se pone al día con ./db/migrar.sh (db/migraciones/):
+--  este archivo y las migraciones dejan la misma base (lo comprueba el CI).
 --  Extensiones    : ninguna (gen_random_uuid() es nativa desde PostgreSQL 13)
 -- -----------------------------------------------------------------------------
 --  CONVENCIONES (las del core y de identity)
@@ -44,9 +47,9 @@ CREATE TYPE accion_auditoria AS ENUM (
 );
 COMMENT ON TYPE accion_auditoria IS 'SUSCRIPCION_CREADA (POST /webhooks), SUSCRIPCION_ELIMINADA (DELETE /webhooks/{id}), SUSCRIPCION_DESACTIVADA (baja automática del proceso de entrega) y SUSCRIPCION_IMPORTADA (npm run suscripciones:importar).';
 
--- Los 12 tipos de evento que el contrato deja suscribir (WebhookSubscription.events), en su
--- orden. Es la misma lista de EVENTOS_WEBHOOK (src/modules/suscripcion/suscripcion.modelo.ts):
--- si una cambia, la otra cambia en el mismo paso.
+-- Los 15 tipos de evento (VuelosEventName del contrato v2): los 12 de WebhookSubscription.events
+-- del contrato 1.5 y los 3 de v2 al final. Es la misma lista de EVENTOS (src/modules/compartido/
+-- eventos-webhook.ts) y de contracts/events: si una cambia, las otras cambian en el mismo paso.
 CREATE FUNCTION fn_es_tipo_evento(p_tipo text) RETURNS boolean
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
 RETURN p_tipo = ANY (ARRAY[
@@ -61,9 +64,12 @@ RETURN p_tipo = ANY (ARRAY[
     'booking.ticket_issuing',
     'booking.ticket_issued',
     'booking.ticket_failed',
-    'booking.checked_in'
+    'booking.checked_in',
+    'hold.created',
+    'booking.seat_changed',
+    'flight.status_changed'
 ]);
-COMMENT ON FUNCTION fn_es_tipo_evento(text) IS 'Si el texto es uno de los 12 tipos de evento suscribibles del contrato.';
+COMMENT ON FUNCTION fn_es_tipo_evento(text) IS 'Si el texto es uno de los 15 tipos de evento (VuelosEventName del contrato v2; los 12 primeros, los del contrato 1.5).';
 
 
 -- =============================================================================
@@ -78,12 +84,14 @@ CREATE TABLE suscripcion (
     activo              boolean      NOT NULL DEFAULT true,
     fecha_creacion      timestamptz  NOT NULL DEFAULT now(),
     fecha_actualizacion timestamptz  NOT NULL DEFAULT now(),
+    formato             text         NOT NULL DEFAULT 'v1',
     CONSTRAINT pk_suscripcion PRIMARY KEY (id),
     CONSTRAINT ck_suscripcion_propietario CHECK (btrim(id_propietario) <> '' AND length(id_propietario) <= 200),
     CONSTRAINT ck_suscripcion_url CHECK (url ~ '^https?://[^[:space:]]+$' AND length(url) <= 2048),
     -- El formato del core: v1.<base64url(nonce | etiqueta | cifrado)>. Nunca el secreto en claro.
     CONSTRAINT ck_suscripcion_secreto CHECK (secreto_cifrado ~ '^v1\.[A-Za-z0-9_-]{40,}$'),
-    CONSTRAINT ck_suscripcion_fechas CHECK (fecha_actualizacion >= fecha_creacion)
+    CONSTRAINT ck_suscripcion_fechas CHECK (fecha_actualizacion >= fecha_creacion),
+    CONSTRAINT ck_suscripcion_formato CHECK (formato IN ('v1', 'v2'))
 );
 
 CREATE TABLE suscripcion_evento (
@@ -115,6 +123,8 @@ CREATE TABLE evento (
     recibido_en      timestamptz  NOT NULL,
     huella           text         NOT NULL,
     publicado_por    text         NOT NULL,
+    correlation_id   text         NOT NULL,
+    traceparent      text,
     CONSTRAINT pk_evento PRIMARY KEY (id),
     CONSTRAINT uq_evento_id_evento UNIQUE (id_evento),
     CONSTRAINT ck_evento_tipo CHECK (fn_es_tipo_evento(tipo)),
@@ -122,7 +132,9 @@ CREATE TABLE evento (
     CONSTRAINT ck_evento_propietario CHECK (btrim(id_propietario) <> '' AND length(id_propietario) <= 200),
     CONSTRAINT ck_evento_payload CHECK (jsonb_typeof(payload) = 'object'),
     CONSTRAINT ck_evento_huella CHECK (huella ~ '^[0-9a-f]{64}$'),
-    CONSTRAINT ck_evento_publicado_por CHECK (btrim(publicado_por) <> '' AND length(publicado_por) <= 200)
+    CONSTRAINT ck_evento_publicado_por CHECK (btrim(publicado_por) <> '' AND length(publicado_por) <= 200),
+    CONSTRAINT ck_evento_correlation_id CHECK (correlation_id ~ '^[A-Za-z0-9._:-]{1,100}$'),
+    CONSTRAINT ck_evento_traceparent CHECK (traceparent IS NULL OR traceparent ~ '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$')
 );
 
 
@@ -132,7 +144,8 @@ CREATE TABLE evento (
 
 -- Una fila por evento y suscripción, con su propio reintento. Se inserta en la misma
 -- transacción que guarda el evento; el envío HTTP lo hace un proceso aparte (nunca dentro de
--- una transacción). cuerpo es el WebhookPayload del contrato, congelado al recibir el evento.
+-- una transacción). cuerpo es lo que recibe el tercero según el formato de su suscripción (el
+-- WebhookPayload v1 o el CloudEvent v2), congelado al recibir el evento.
 CREATE TABLE entrega (
     id                  bigint          GENERATED ALWAYS AS IDENTITY,
     suscripcion_id      uuid            NOT NULL,
@@ -210,7 +223,8 @@ CREATE UNIQUE INDEX uq_suscripcion_propietario_url ON suscripcion (id_propietari
 CREATE INDEX ix_suscripcion_propietario ON suscripcion (id_propietario, fecha_creacion) WHERE activo;
 -- El reparto: suscripciones de un tipo de evento
 CREATE INDEX ix_suscripcion_evento_tipo ON suscripcion_evento (tipo_evento, suscripcion_id);
-CREATE INDEX ix_evento_propietario ON evento (id_propietario, recibido_en);
+-- El feed (GET /api/v2/vuelos/eventos): los eventos de un dueño en orden de llegada, por cursor
+CREATE INDEX ix_evento_feed ON evento (id_propietario, id);
 -- El proceso de entrega toma las pendientes cuya hora llegó
 CREATE INDEX ix_entrega_pendiente ON entrega (proximo_intento, id) WHERE estado = 'PENDIENTE';
 -- La racha de fallidas de una suscripción (baja automática)
@@ -231,6 +245,7 @@ COMMENT ON TABLE entrega IS 'Bandeja de salida: una fila por evento y suscripci�
 COMMENT ON TABLE auditoria IS 'Altas y bajas de suscripciones, de solo inserción. Nunca el secreto ni la URL completa.';
 
 COMMENT ON COLUMN suscripcion.id_propietario IS 'sub del token que la creó (persona o cliente OAuth de identity_vuelos). Es el ownerId de los eventos.';
+COMMENT ON COLUMN suscripcion.formato IS 'v1: se creó por /flights/v1/webhooks y recibe el WebhookPayload del contrato 1.5. v2: se creó por /api/v2/vuelos/webhooks y recibe CloudEvents 1.0. No cambia nunca.';
 COMMENT ON COLUMN suscripcion.secreto_cifrado IS 'AES-256-GCM con clave derivada por HKDF de WEBHOOK_SECRET_KEY, formato v1.<base64url>: el mismo del core, para migrar sin que el tercero cambie nada.';
 COMMENT ON COLUMN evento.id_evento IS 'eventId del sobre y del WebhookPayload: el mismo para todas las suscripciones que lo reciben. El receptor lo usa (X-Webhook-Id) para no procesar dos veces.';
 COMMENT ON COLUMN evento.version_esquema IS 'schemaVersion del sobre (1.0...). El mayor elige el archivo contracts/events/<tipo>.v<mayor>.json.';
@@ -239,7 +254,9 @@ COMMENT ON COLUMN evento.ocurrido_en IS 'occurredAt del sobre: cuándo pasó el 
 COMMENT ON COLUMN evento.recibido_en IS 'Cuándo lo recibió este servicio (Reloj de la aplicación).';
 COMMENT ON COLUMN evento.huella IS 'SHA-256 del sobre canónico: una repetición con el mismo eventId y otro contenido es un 409.';
 COMMENT ON COLUMN evento.publicado_por IS 'client_id del token que lo publicó.';
-COMMENT ON COLUMN entrega.cuerpo IS 'WebhookPayload congelado al recibir el evento: un reintento envía exactamente el mismo cuerpo.';
+COMMENT ON COLUMN evento.correlation_id IS 'X-Correlation-Id del proceso que originó el hecho: el correlationId del sobre, si no el X-Correlation-Id de la publicación, si no uno generado. Va en el CloudEvent (correlationid) y en la cabecera de cada entrega.';
+COMMENT ON COLUMN evento.traceparent IS 'traceparent del span SERVER que recibió el evento (continúa la traza del relevo del core): cada entrega abre su span CLIENT como hijo. Nunca se manda a un tercero.';
+COMMENT ON COLUMN entrega.cuerpo IS 'Lo que recibe el tercero (WebhookPayload v1 o CloudEvent v2, según la suscripción), congelado al recibir el evento: un reintento envía exactamente el mismo cuerpo.';
 COMMENT ON COLUMN entrega.intentos IS 'Envíos HTTP ya hechos (el que está en curso cuenta). Al llegar al máximo sin respuesta 2xx pasa a FALLIDO.';
 COMMENT ON COLUMN entrega.proximo_intento IS 'Cuándo se puede tomar. Mientras un proceso la envía, el fin de su arrendamiento.';
 COMMENT ON COLUMN entrega.ultimo_error IS 'Código corto del último fallo (TIMEOUT, ECONNREFUSED, HTTP_500...). Nunca un mensaje con URL o cuerpo.';

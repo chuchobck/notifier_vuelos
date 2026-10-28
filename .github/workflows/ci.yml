@@ -1,5 +1,6 @@
 # Integración continua: en cada push y pull request a main, una base PostgreSQL 18 nueva con
-# db/esquema_notificaciones.sql, y luego lint, formato, tipos, compilación y la suite e2e
+# db/esquema_notificaciones.sql (y la comprobación de que main + db/migraciones deja la misma
+# base), y luego lint, formato, tipos, compilación y la suite e2e
 # completa (que incluye la prueba de que contracts/notifier-openapi.json está al día). Aparte:
 # los contratos de eventos (AsyncAPI válido y, en los pull requests, eventos:breaking contra la
 # rama base) y la imagen de Docker, que tiene que construir y correr sin privilegios.
@@ -63,6 +64,16 @@ jobs:
           CONTENEDOR: ${{ job.services.postgres.id }}
         run: docker exec -i "$CONTENEDOR" psql -U postgres -d notifier_db -v ON_ERROR_STOP=1 -q < db/esquema_notificaciones.sql
 
+      # Una base que ya existe (esquema de main + db/migraciones) tiene que quedar igual a una nueva
+      # (db/esquema_notificaciones.sql de este árbol): pg_dump -s de las dos, comparados. Las
+      # migraciones se aplican dos veces para comprobar que son idempotentes.
+      - name: Base migrada = base nueva
+        env:
+          CONTENEDOR: ${{ job.services.postgres.id }}
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          scripts/comprobar-migraciones.sh FETCH_HEAD
+
       - name: Lint
         run: npm run lint
 
@@ -119,4 +130,4 @@ jobs:
       - name: La imagen corre como usuario sin privilegios y trae los esquemas
         run: |
           test "$(docker run --rm --entrypoint id quinde-notifier:ci -u)" = "1000"
-          test "$(docker run --rm --entrypoint sh quinde-notifier:ci -c 'ls contracts/events | wc -l')" = "12"
+          test "$(docker run --rm --entrypoint sh quinde-notifier:ci -c 'ls contracts/events | wc -l')" = "15"

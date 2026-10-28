@@ -4,6 +4,7 @@ import { ClienteWebhook } from './cliente-webhook';
 import { ClienteWebhookHttp } from './cliente-webhook-http';
 import { EntregaRepository } from './entrega.repository';
 import { EntregaWebhooks } from './entrega-webhooks';
+import { MetricasEntregas } from './metricas-entregas';
 
 /**
  * El proceso que vacía la bandeja de salida (entrega) enviando los POST firmados, fuera de toda
@@ -13,6 +14,7 @@ import { EntregaWebhooks } from './entrega-webhooks';
   providers: [
     EntregaWebhooks,
     EntregaRepository,
+    MetricasEntregas,
     CifradoSecreto,
     { provide: ClienteWebhook, useClass: ClienteWebhookHttp },
   ],

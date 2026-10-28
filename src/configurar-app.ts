@@ -7,6 +7,8 @@ import { crearPipeValidacion } from './common/pipes/validacion.pipe';
 import { parsearTrustProxy } from './config/proxy';
 import { configurarSeguridad } from './config/seguridad';
 import { configurarSwagger, RUTA_SWAGGER } from './config/swagger';
+import { middlewareContextoTraza, middlewareObservabilidad } from './observabilidad/express';
+import { Observabilidad } from './observabilidad/observabilidad';
 import { RUTAS_SIN_CACHE } from './routes/index.routes';
 
 export interface OpcionesConfigurarApp {
@@ -19,9 +21,11 @@ export interface OpcionesConfigurarApp {
  * las pruebas e2e, para que probar el servicio sea probar el que de verdad se despliega.
  *
  * El orden de los middlewares importa:
- *   1. request id: antes que todo, para que hasta un 413 del parser lleve X-Request-Id
- *   2. helmet, CORS, parser del cuerpo y tipo de contenido (configurarSeguridad)
- *   3. contexto asíncrono: después del parser, que perdería el contexto si se abriera antes
+ *   1. observabilidad: el span SERVER y X-Trace-Id, antes que todo (estándar del gateway), con el
+ *      contexto de la petición (X-Request-Id) que crea al empezar
+ *   2. request id: para que hasta un 413 del parser lleve X-Request-Id
+ *   3. helmet, CORS, parser del cuerpo y tipo de contenido (configurarSeguridad)
+ *   4. contexto asíncrono y de la traza: después del parser, que los perdería si se abrieran antes
  */
 export function configurarApp(app: NestExpressApplication, opciones: OpcionesConfigurarApp = {}) {
   const config = app.get(ConfigService);
@@ -34,9 +38,12 @@ export function configurarApp(app: NestExpressApplication, opciones: OpcionesCon
     opciones.logger ?? new LoggerJson(undefined, nivelesPorEntorno(config.get('NODE_ENV')));
   app.useLogger(logger);
 
+  const observabilidad = app.get(Observabilidad);
+  app.use(middlewareObservabilidad(observabilidad));
   app.use(middlewareRequestId);
   configurarSeguridad(app, RUTAS_SIN_CACHE);
   app.use(middlewareContexto);
+  app.use(middlewareContextoTraza(observabilidad));
 
   app.useGlobalPipes(crearPipeValidacion());
 

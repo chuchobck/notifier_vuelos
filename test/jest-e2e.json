@@ -5,7 +5,7 @@
   "setupFiles": ["<rootDir>/test/utils/entorno-pruebas.ts"],
   "moduleFileExtensions": ["js", "json", "ts"],
   "transform": {
-    "/node_modules/jose/.+\\.js$": "<rootDir>/test/utils/transformar-jose.js",
+    "/node_modules/(jose|@opentelemetry/otlp-exporter-base)/.+\\.js$": "<rootDir>/test/utils/transformar-jose.js",
     "^.+\\.ts$": [
       "ts-jest",
       {
@@ -14,6 +14,6 @@
       }
     ]
   },
-  "transformIgnorePatterns": ["/node_modules/(?!jose/)"],
+  "transformIgnorePatterns": ["/node_modules/(?!(jose|@opentelemetry/otlp-exporter-base)/)"],
   "testTimeout": 30000
 }

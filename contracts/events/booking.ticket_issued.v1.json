@@ -19,7 +19,7 @@
     },
     "schemaVersion": {
       "type": "string",
-      "enum": ["1.0"],
+      "enum": ["1.0", "1.1"],
       "description": "Versión del esquema, mayor.menor. Un menor nuevo agrega solo campos opcionales; un mayor nuevo es otro archivo (<tipo>.v2.json)."
     },
     "occurredAt": {
@@ -32,6 +32,11 @@
       "type": "string",
       "format": "uuid",
       "description": "Dueño del hecho: el sub del token con que se creó (id_propietario). Solo sus suscripciones lo reciben."
+    },
+    "correlationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,100}$",
+      "description": "Opcional (desde 1.1, aceptado en cualquier 1.x): el X-Correlation-Id del proceso que originó el hecho, sin cambios. Va al CloudEvent (correlationid) y a la cabecera X-Correlation-Id de cada entrega. Sin él, el notifier usa el X-Correlation-Id de la publicación o genera uno."
     },
     "data": {
       "type": "object",
@@ -61,6 +66,81 @@
             "CANCELLED"
           ],
           "description": "Estado de la reserva (BookingDetail.status) en el momento del evento, no el de ahora."
+        },
+        "ownerId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@|-]{1,100}$",
+          "description": "Opcional (1.1): el usuario final de la reserva (X-User-Id de Booking) o, sin él, el dueño. BookingEventData.ownerId del contrato v2."
+        },
+        "partnerOrderId": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9._:-]{1,100}$",
+          "description": "Opcional (1.1): la orden del partner (Booking) a la que pertenece la reserva."
+        },
+        "packageId": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9._:-]{1,100}$",
+          "description": "Opcional (1.1): el paquete (combo) de Booking del que forma parte."
+        },
+        "grandTotal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currency", "total"],
+          "description": "Opcional (1.1): el total de la reserva (MoneyAmount del contrato v2).",
+          "properties": {
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$",
+              "description": "Moneda ISO 4217 (USD)."
+            },
+            "baseFare": {
+              "type": "string",
+              "pattern": "^[0-9]{1,9}\\.[0-9]{2}$",
+              "description": "Tarifa base en texto decimal."
+            },
+            "taxes": {
+              "type": "string",
+              "pattern": "^[0-9]{1,9}\\.[0-9]{2}$",
+              "description": "Impuestos en texto decimal."
+            },
+            "total": {
+              "type": "string",
+              "pattern": "^[0-9]{1,9}\\.[0-9]{2}$",
+              "description": "Total en texto decimal (\"239.00\")."
+            }
+          }
+        },
+        "paymentReference": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{8,64}$",
+          "description": "Opcional (1.1): la referencia del pago de la emisión (paymentReference de Booking)."
+        },
+        "tickets": {
+          "type": "array",
+          "maxItems": 50,
+          "description": "Opcional (1.1): los boletos emitidos (Facturación).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ticketId", "eTicketNumber"],
+            "properties": {
+              "ticketId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+                "description": "Id del boleto."
+              },
+              "eTicketNumber": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9-]{1,30}$",
+                "description": "Número de boleto electrónico."
+              },
+              "passengerId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+                "description": "Id del pasajero en la reserva (nunca su nombre ni su documento)."
+              }
+            }
+          }
         }
       }
     }
@@ -76,6 +156,36 @@
         "bookingId": "3f0c6a9e-2b1d-4c8e-9a7f-5d4e3c2b1a09",
         "pnr": "Q7K2MX",
         "status": "TICKET_ISSUING"
+      }
+    },
+    {
+      "eventId": "5f8d2c1e-7a3b-4e9d-8c6f-000000000109",
+      "eventType": "booking.ticket_issued",
+      "schemaVersion": "1.1",
+      "occurredAt": "2026-10-16T14:30:00.000Z",
+      "ownerId": "0b7c9f4e-3d2a-4b1c-8e5f-6a7b8c9d0e1f",
+      "correlationId": "corr-vuelos-7f3a9c",
+      "data": {
+        "bookingId": "3f0c6a9e-2b1d-4c8e-9a7f-5d4e3c2b1a09",
+        "pnr": "Q7K2MX",
+        "status": "TICKET_ISSUING",
+        "ownerId": "usr-4f9a2c",
+        "partnerOrderId": "ORD-BKP-55120",
+        "packageId": null,
+        "grandTotal": {
+          "currency": "USD",
+          "baseFare": "200.00",
+          "taxes": "39.00",
+          "total": "239.00"
+        },
+        "paymentReference": "PAY-BKP-20261023-000981",
+        "tickets": [
+          {
+            "ticketId": "TKT-0001",
+            "eTicketNumber": "8881234567890",
+            "passengerId": "PAX-1"
+          }
+        ]
       }
     }
   ]

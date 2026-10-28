@@ -66,9 +66,11 @@ model evento {
   recibido_en     DateTime  @db.Timestamptz(6)
   huella          String
   publicado_por   String
+  correlation_id  String
+  traceparent     String?
   entrega         entrega[]
 
-  @@index([id_propietario, recibido_en], map: "ix_evento_propietario")
+  @@index([id_propietario, id], map: "ix_evento_feed")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -81,6 +83,7 @@ model suscripcion {
   activo              Boolean              @default(true)
   fecha_creacion      DateTime             @default(now()) @db.Timestamptz(6)
   fecha_actualizacion DateTime             @default(now()) @db.Timestamptz(6)
+  formato             String               @default("v1")
   auditoria           auditoria[]
   entrega             entrega[]
   suscripcion_evento  suscripcion_evento[]
