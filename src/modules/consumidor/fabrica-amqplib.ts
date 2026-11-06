@@ -3,11 +3,22 @@ import { connect } from 'amqplib';
 import type { ConfirmChannel } from 'amqplib';
 import { CanalAmqp, ConexionAmqp, FabricaAmqp, MensajeAmqp } from './canal-amqp';
 
+/** Latido explícito de 15 s; amqplib solo lo lee de la URL. */
+export function conLatido(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!u.searchParams.has('heartbeat')) u.searchParams.set('heartbeat', '15');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 /** Implementación real sobre amqplib: un canal con confirmaciones del broker. */
 @Injectable()
 export class FabricaAmqplib extends FabricaAmqp {
   async conectar(url: string): Promise<ConexionAmqp> {
-    const conexion = await connect(url);
+    const conexion = await connect(conLatido(url), { timeout: 10_000 });
     // Sin escucha, un 'error' de la conexión tumbaría el proceso
     conexion.on('error', () => undefined);
     return {

@@ -9,6 +9,7 @@ import {
   MensajeAmqp,
   OpcionesPublicacionAmqp,
 } from '../src/modules/consumidor/canal-amqp';
+import { conLatido } from '../src/modules/consumidor/fabrica-amqplib';
 import { ConsumidorAmqp } from '../src/modules/consumidor/consumidor-amqp';
 import { ProcesadorMensajes } from '../src/modules/consumidor/procesador-mensajes';
 import { REGLAS_AMQP, TOPOLOGIA } from '../src/modules/consumidor/topologia';
@@ -386,6 +387,84 @@ describe('ConsumidorAmqp', () => {
     await consumidor.onModuleDestroy();
   }, 10_000);
 
+  describe('intentos colgados o cortados a mitad', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    function armarCon(
+      conectar: (
+        n: number,
+        canal: CanalFalso,
+        f: { cierre?: (e?: Error) => void },
+      ) => Promise<ConexionAmqp>,
+    ) {
+      const canal = new CanalFalso();
+      const f: { cierre?: (e?: Error) => void } = {};
+      let conexiones = 0;
+      class Fabrica extends FabricaAmqp {
+        async conectar(): Promise<ConexionAmqp> {
+          return conectar(++conexiones, canal, f);
+        }
+      }
+      const s = procesadorCon('nuevo');
+      const consumidor = new ConsumidorAmqp(
+        new Fabrica(),
+        s.procesador,
+        s.observabilidad,
+        config({ RABBITMQ_ENABLED: 'true', RABBITMQ_URL: 'amqp://x' }),
+      );
+      return { consumidor, f, canal, conexiones: () => conexiones };
+    }
+    const normal = (canal: CanalFalso, f: { cierre?: (e?: Error) => void }): ConexionAmqp => ({
+      crearCanal: async () => canal,
+      alCerrar: (escucha) => {
+        f.cierre = escucha;
+      },
+      cerrar: async () => undefined,
+    });
+
+    it('una conexión que nunca resuelve vence el plazo y se reintenta', async () => {
+      const { consumidor, conexiones } = armarCon((n, canal, f) =>
+        n === 1 ? new Promise<ConexionAmqp>(() => undefined) : Promise.resolve(normal(canal, f)),
+      );
+      consumidor.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(REGLAS_AMQP.plazoIntentoMs - 100);
+      expect(consumidor.estado()).toBe('conectando');
+      await jest.advanceTimersByTimeAsync(200);
+      expect(consumidor.estado()).toBe('desconectado');
+      await jest.advanceTimersByTimeAsync(REGLAS_AMQP.reconexionInicialMs * 1.25 + 50);
+      expect(conexiones()).toBe(2);
+      expect(consumidor.estado()).toBe('conectado');
+      await consumidor.onModuleDestroy();
+    });
+
+    it('un cierre durante la declaración agenda un único reintento', async () => {
+      let soltar: (() => void) | undefined;
+      const { consumidor, f, canal, conexiones } = armarCon(async (n, c, ff) => {
+        if (n > 1) return normal(c, ff);
+        const base = normal(c, ff);
+        return {
+          ...base,
+          crearCanal: async () =>
+            ({
+              ...c,
+              declararExchange: () =>
+                new Promise<void>((_, rechazar) => (soltar = () => rechazar(new Error('cerrado')))),
+            }) as unknown as CanalFalso,
+        };
+      });
+      consumidor.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(10);
+      f.cierre?.(new Error('se cayó')); // el evento de cierre agenda el reintento...
+      soltar?.(); // ...y la declaración fallida intentaría agendar otro
+      await jest.advanceTimersByTimeAsync(REGLAS_AMQP.reconexionMaximaMs * 2);
+      expect(conexiones()).toBe(2);
+      expect(consumidor.estado()).toBe('conectado');
+      expect(canal.exchanges).toHaveLength(1);
+      await consumidor.onModuleDestroy();
+    });
+  });
+
   it('un mensaje que llega por el consumo se procesa y se confirma', async () => {
     const { fabrica, consumidor } = armar({ RABBITMQ_ENABLED: 'true', RABBITMQ_URL: 'amqp://x' });
     await consumidor.conectar();
@@ -438,5 +517,12 @@ describe('entorno de RabbitMQ', () => {
       /RABBITMQ_PREFETCH/,
     );
     expect(validarEntorno({ ...base, RABBITMQ_PREFETCH: '25' }).RABBITMQ_PREFETCH).toBe(25);
+  });
+});
+
+describe('latido de la conexión', () => {
+  it('añade heartbeat=15 sin tocar credenciales, y respeta uno ya puesto', () => {
+    expect(conLatido('amqp://u:p%40x@h:5672/')).toBe('amqp://u:p%40x@h:5672/?heartbeat=15');
+    expect(conLatido('amqp://u:p@h:5672/?heartbeat=5')).toBe('amqp://u:p@h:5672/?heartbeat=5');
   });
 });

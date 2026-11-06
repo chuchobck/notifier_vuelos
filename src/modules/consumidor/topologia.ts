@@ -26,6 +26,8 @@ export const REGLAS_AMQP = {
   /** Espera antes de reconectar: crece al doble hasta el tope; con un 0 a 25 % de variación. */
   reconexionInicialMs: 1_000,
   reconexionMaximaMs: 30_000,
+  /** Tope del intento completo (conexión + topología + consumo). */
+  plazoIntentoMs: 10_000,
   /** Lo que se espera a los mensajes en curso al apagar. */
   plazoCierreMs: 5_000,
 };

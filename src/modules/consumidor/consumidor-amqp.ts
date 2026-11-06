@@ -28,6 +28,8 @@ export class ConsumidorAmqp implements OnApplicationBootstrap, OnModuleDestroy {
   private temporizador: NodeJS.Timeout | undefined;
   private espera: number = REGLAS_AMQP.reconexionInicialMs;
   private cerrando = false;
+  /** Número del intento en curso: separa los avisos de intentos viejos de los vigentes. */
+  private intento = 0;
   private readonly enCurso = new Set<Promise<void>>();
 
   constructor(
@@ -56,41 +58,60 @@ export class ConsumidorAmqp implements OnApplicationBootstrap, OnModuleDestroy {
     void this.conectar();
   }
 
-  /** Un intento de conexión; si falla, programa el siguiente. */
+  /** Un intento de conexión (con plazo); si falla o vence, programa el siguiente. */
   async conectar(): Promise<void> {
     if (this.cerrando || !this.url) return;
+    const intento = ++this.intento;
+    const url = this.url;
     this.cambiarEstado('conectando');
     let conexion: ConexionAmqp | undefined;
-    try {
-      conexion = await this.fabrica.conectar(this.url);
+    let vencido = false;
+    let vencimiento: NodeJS.Timeout | undefined;
+    const tope = new Promise<never>((_, rechazar) => {
+      vencimiento = setTimeout(() => {
+        vencido = true;
+        rechazar(Object.assign(new Error('plazo del intento'), { code: 'ATTEMPT_TIMEOUT' }));
+      }, REGLAS_AMQP.plazoIntentoMs);
+      vencimiento.unref();
+    });
+    const trabajo = async (): Promise<void> => {
+      conexion = await this.fabrica.conectar(url);
       const actual = conexion;
+      // Un intento vencido o reemplazado ya reprogramó: lo que llegue tarde solo se cierra
+      if (vencido || this.cerrando) return void (await actual.cerrar().catch(() => undefined));
       let perdida = false;
       actual.alCerrar(() => {
         if (perdida) return;
         perdida = true;
         if (this.conexion === actual) this.conexion = undefined;
-        this.perdioConexion('la conexión se cerró');
+        this.perdioConexion('la conexión se cerró', intento);
       });
       const canal = await actual.crearCanal();
       await this.declarar(canal);
       await canal.prefetch(this.prefetch);
       await canal.consumir(TOPOLOGIA.colaPrincipal, (mensaje) => this.alRecibir(canal, mensaje));
-      if (this.cerrando) {
+      if (vencido || this.cerrando) {
         await actual.cerrar();
         return;
       }
       this.conexion = actual;
       this.espera = REGLAS_AMQP.reconexionInicialMs;
       this.cambiarEstado('conectado');
+    };
+    try {
+      await Promise.race([trabajo(), tope]);
     } catch (error) {
+      vencido = true;
       // Solo la clase y el código: el mensaje de amqplib puede traer la URL con su clave
       const codigo = (error as NodeJS.ErrnoException)?.code;
       this.logger.warn(
         `No se pudo conectar a RabbitMQ (${error instanceof Error ? error.name : 'Error'}` +
           `${codigo ? ` ${codigo}` : ''})`,
       );
-      if (conexion) await conexion.cerrar().catch(() => undefined);
-      this.perdioConexion('falló el intento');
+      if (conexion) await (conexion as ConexionAmqp).cerrar().catch(() => undefined);
+      this.perdioConexion('falló el intento', intento);
+    } finally {
+      clearTimeout(vencimiento);
     }
   }
 
@@ -128,14 +149,18 @@ export class ConsumidorAmqp implements OnApplicationBootstrap, OnModuleDestroy {
     this.enCurso.add(trabajo);
   }
 
-  private perdioConexion(motivo: string): void {
-    if (this.cerrando) return;
+  /** Un solo reintento pendiente: los avisos de un intento viejo, o repetidos, se ignoran. */
+  private perdioConexion(motivo: string, intento: number): void {
+    if (this.cerrando || intento !== this.intento || this.temporizador !== undefined) return;
     this.cambiarEstado('desconectado');
     const variacion = 1 + Math.random() * 0.25;
     const demora = Math.round(this.espera * variacion);
     this.espera = Math.min(this.espera * 2, REGLAS_AMQP.reconexionMaximaMs);
     this.logger.warn(`RabbitMQ desconectado (${motivo}); se reintenta en ${demora} ms`);
-    this.temporizador = setTimeout(() => void this.conectar(), demora);
+    this.temporizador = setTimeout(() => {
+      this.temporizador = undefined;
+      void this.conectar();
+    }, demora);
     // No mantiene vivo el proceso
     this.temporizador.unref();
   }
