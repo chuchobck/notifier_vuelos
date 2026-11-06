@@ -1,4 +1,4 @@
-import { Counter, Histogram, Registry } from 'prom-client';
+import { Counter, Gauge, Histogram, Registry } from 'prom-client';
 import { CUBETAS_DURACION } from './metricas';
 
 /** Cómo terminó un intento de entrega: lista cerrada (la etiqueta `result`). */
@@ -10,6 +10,9 @@ export type FormatoMetrica = 'v1' | 'v2';
 /** Cómo terminó una publicación del core: `accepted` (202) o `duplicate` (200). */
 export type ResultadoPublicacionMetrica = 'accepted' | 'duplicate';
 
+/** Qué pasó con un mensaje de RabbitMQ ya procesado: lista cerrada (la etiqueta `result`). */
+export type ResultadoAmqpMetrica = 'accepted' | 'duplicate' | 'dead_lettered' | 'retried';
+
 /**
  * Las métricas propias del notifier (`notifier_*`), con la regla de cardinalidad del estándar:
  * etiquetas de listas cerradas. Nunca el id de una suscripción, su URL, el dueño, el tipo de evento
@@ -19,6 +22,11 @@ export type ResultadoPublicacionMetrica = 'accepted' | 'duplicate';
  * - `notifier_delivery_duration_seconds{format}`: lo que tardó cada POST al tercero.
  * - `notifier_events_received_total{result}`: publicaciones del core aceptadas o repetidas.
  *
+ * - `notifier_amqp_consumed_total`: mensajes recibidos de RabbitMQ (antes de procesarlos).
+ * - `notifier_amqp_results_total{result}`: cómo terminó cada uno (accepted, duplicate, dead_lettered,
+ *   retried). Un mismo mensaje puede contar `retried` varias veces, una por intento.
+ * - `notifier_amqp_connected`: 1 si el consumidor tiene conexión con el broker, 0 si no.
+ *
  * Los gauges de la bandeja (`notifier_deliveries_pending`, `notifier_deliveries_oldest_pending_seconds`)
  * se leen de la base al raspar: están en src/modules/entrega/metricas-entregas.ts.
  */
@@ -26,6 +34,9 @@ export class MetricasNotifier {
   readonly entregas: Counter<'result' | 'format'>;
   readonly duracionEntrega: Histogram<'format'>;
   readonly eventosRecibidos: Counter<'result'>;
+  readonly amqpConsumidos: Counter;
+  readonly amqpResultados: Counter<'result'>;
+  readonly amqpConectado: Gauge;
 
   constructor(registro: Registry) {
     this.entregas = new Counter({
@@ -45,6 +56,22 @@ export class MetricasNotifier {
       name: 'notifier_events_received_total',
       help: 'Eventos publicados por el core: accepted (202) o duplicate (200, ya estaba)',
       labelNames: ['result'] as const,
+      registers: [registro],
+    });
+    this.amqpConsumidos = new Counter({
+      name: 'notifier_amqp_consumed_total',
+      help: 'Mensajes recibidos de RabbitMQ (cola notifier.eventos)',
+      registers: [registro],
+    });
+    this.amqpResultados = new Counter({
+      name: 'notifier_amqp_results_total',
+      help: 'Mensajes de RabbitMQ por resultado: accepted, duplicate, dead_lettered, retried',
+      labelNames: ['result'] as const,
+      registers: [registro],
+    });
+    this.amqpConectado = new Gauge({
+      name: 'notifier_amqp_connected',
+      help: '1 si el consumidor de RabbitMQ está conectado al broker, 0 si no (o si está apagado)',
       registers: [registro],
     });
   }

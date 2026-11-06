@@ -50,6 +50,9 @@ cuenta como no definida.
 | `NOTIFIER_DELIVERY_JOB_ENABLED` | No | `true` | `true`: el proceso de entrega corre. Con `false` los eventos se guardan y se reparten, pero no se envían |
 | `NOTIFIER_DELIVERY_JOB_INTERVAL_SECONDS` | No | `10` | 10 segundos entre corridas (de 5 a 3600) |
 | `AIRLINE_CODE` | No | `ecoairlines` | `quinde`. El código de la aerolínea en el `source` de cada CloudEvent de una suscripción v2: `/aerolineas/<AIRLINE_CODE>/vuelos` (contrato de Vuelos v2, §8). Minúsculas, dígitos y guiones (2 a 40); otro formato no arranca. Cambiarlo cambia el `source` de lo que se entregue y del feed desde ese momento (lo ya congelado en `entrega.cuerpo` no cambia) |
+| `RABBITMQ_ENABLED` | No | `true` | `false`: el notifier no abre conexión con el broker y funciona exactamente como antes (los eventos llegan solo por `POST /internal/v1/events`). Con `true` consume la cola `notifier.eventos` (ver «Consumidor de RabbitMQ») |
+| `RABBITMQ_URL` | Con `RABBITMQ_ENABLED=true` | `amqps://notifier:***@rabbit.interno:5671` | Con el consumidor encendido y sin ella, no arranca. `amqp://` o `amqps://`; lleva credenciales: nunca se registra ni aparece en un error |
+| `RABBITMQ_PREFETCH` | No | `10` | 10 mensajes sin confirmar a la vez (de 1 a 1000) |
 | `OTEL_SERVICE_NAME` | No | `quinde-notifier` | `quinde-notifier` (`service.name` de trazas y métricas; estándar de observabilidad de gateway_vuelos) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://jaeger:4318` | Vacía: las trazas no se exportan (el SDK arranca igual: `traceId` en los logs y `X-Trace-Id`). Con valor, OTLP/HTTP a `{endpoint}/v1/traces` en lotes cada 2 s, con plazo de 3 s: un recolector caído nunca frena una petición ni una entrega |
 | `OTEL_TRACES_SAMPLER_ARG` | No | `0.1` | 1.0 en desarrollo y 0.1 en producción (fracción de trazas raíz; una hija sigue a su padre, así que la traza del relevo del core decide) |
@@ -67,6 +70,68 @@ Los límites propios (10 altas de suscripción por minuto e IP, 10 suscripciones
 usuario, sumando v1 y v2) y las reglas de entrega están en el código, no en el entorno: v1, las del
 core (5 intentos, esperas de 1, 5, 30 y 120 minutos); v2, las del contrato de Vuelos v2 (6 intentos,
 esperas de 1, 5, 30, 120 y 360 minutos); en los dos, plazo de 5 s y baja tras 10 fallidas seguidas.
+
+## Consumidor de RabbitMQ
+
+Camino principal de los eventos (fase 4b): el gateway los deja en RabbitMQ y el notifier los
+consume con la misma `PublicacionEventos` que usa `POST /internal/v1/events`, que queda de respaldo.
+Con `RABBITMQ_ENABLED=false` (el valor por defecto) nada de esto corre. `/health` y `/health/ready`
+no dependen del broker; el estado se ve en el log (`Estado de RabbitMQ: ...`) y en el gauge
+`notifier_amqp_connected`.
+
+El notifier **declara** esto al conectar (idempotente: sobrevive a un broker nuevo o con colas
+borradas):
+
+| Elemento | Detalle |
+| --- | --- |
+| Exchange `vuelos.eventos` | `topic`, durable. El gateway publica con `routingKey = eventType`, `messageId = eventId` y el sobre JSON exacto como cuerpo |
+| Cola `notifier.eventos` | Durable, ligada al exchange con `#`. La que consume el notifier |
+| Cola `notifier.eventos.retry` | Durable, TTL de 30 s. Al expirar, el mensaje vuelve **directo** a `notifier.eventos` (exchange por defecto), no al exchange: así no se repite en otras colas que se liguen a `vuelos.eventos` |
+| Cola `notifier.eventos.dlq` | Durable, sin TTL ni consumidor. Aquí se revisa a mano |
+
+Si el gateway declara también el exchange, que use los mismos argumentos (`topic`, durable): un
+exchange declarado con otros argumentos hace fallar al segundo con `PRECONDITION_FAILED`.
+
+El broker no garantiza orden entre eventos; el tercero ordena por `occurredAt`.
+
+**Qué pasa con cada mensaje** (detalle en docs/EVENTOS.md): aceptado o repetido con el mismo
+contenido, `ack`. Sobre inválido, tipo desconocido o `eventId` con otro contenido, a la DLQ y `ack`,
+sin reintento. Error transitorio (base caída, timeout), a `notifier.eventos.retry`; al quinto
+intento, a la DLQ. Si el broker no está al arrancar o se cae, el notifier sigue sirviendo y
+reconecta con espera creciente (de 1 s a 30 s).
+
+### Reencolar a mano desde la DLQ
+
+Cada mensaje de la DLQ trae `x-estado`, `x-motivo` (nombra campos, nunca valores) y
+`x-routing-key-original`; no trae `x-death` ni `x-intentos`, así que al reencolarlo empieza con los
+cinco intentos completos. **Reencolar solo tiene sentido si se arregló la causa:** un `SOBRE_INVALIDO`
+o un `CONFLICTO` vuelve a la DLQ igual (hay que corregir al publicador, no reencolar).
+`REINTENTOS_AGOTADOS` sí es reencolable cuando la base ya responde.
+
+1. Revisar: panel de gestión, cola `notifier.eventos.dlq` → *Get messages* (con *Nack message
+   requeue true*, para no sacarlos), o `rabbitmqadmin get queue=notifier.eventos.dlq count=10 ackmode=ack_requeue_true`.
+2. Mover todos a la cola principal, con el plugin Shovel (panel de gestión → cola → *Move messages*,
+   con destino `notifier.eventos`), o por línea de comandos:
+
+   ```bash
+   rabbitmqctl set_parameter shovel reencolar-dlq '{
+     "src-protocol": "amqp091", "src-uri": "amqp://", "src-queue": "notifier.eventos.dlq",
+     "dest-protocol": "amqp091", "dest-uri": "amqp://", "dest-queue": "notifier.eventos",
+     "src-delete-after": "queue-length"
+   }'
+   rabbitmqctl clear_parameter shovel reencolar-dlq   # al terminar
+   ```
+
+   Se manda a la **cola** (no al exchange) para que solo el notifier lo reciba otra vez. La
+   publicación es idempotente por `eventId`: reencolar un evento que sí se había guardado da un
+   duplicado y se descarta.
+3. Un solo evento: publicar su cuerpo a mano con `POST /internal/v1/events` (el respaldo HTTP) y
+   borrarlo de la DLQ.
+
+Métricas (`/metrics`, solo en `METRICS_PORT`): `notifier_amqp_consumed_total`,
+`notifier_amqp_results_total{result=accepted|duplicate|dead_lettered|retried}` y
+`notifier_amqp_connected` (1/0). Una DLQ que crece se ve en `dead_lettered`; el tamaño de la cola
+lo da el propio RabbitMQ.
 
 ## Base de datos
 
