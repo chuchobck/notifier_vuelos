@@ -237,6 +237,19 @@ del §6 del contrato v2 y el estándar de observabilidad del gateway (fase 7e).
 - La firma v2 contra lo que espere Booking (pendiente de confirmar).
 - PostgreSQL 18 en local (lo corre el CI).
 
+## Fase 4b (consumidor de RabbitMQ)
+
+El notifier consume los eventos de la cola `notifier.eventos` (exchange `vuelos.eventos`) con la
+misma `PublicacionEventos` del controlador; `POST /internal/v1/events` queda de respaldo. Apagado por
+defecto (`RABBITMQ_ENABLED=false`). Topología, reglas y cómo reencolar: docs/EVENTOS.md y docs/DEPLOY.md.
+
+Decisiones sin consultar: la cola de reintento devuelve el mensaje directo a `notifier.eventos`
+(exchange por defecto) y no a `vuelos.eventos`, para no duplicarlo en otras colas ligadas; los
+intentos se cuentan con `x-death` y `x-intentos` (el mayor); `/health` no informa del broker
+(cambiaría el contrato de la ruta; el estado va en el log y en `notifier_amqp_connected`); el
+`publicado_por` es `amqp:gateway`, sin entrada de auditoría (la auditoría es de suscripciones).
+Sin verificar contra un RabbitMQ real: las pruebas usan un canal falso.
+
 ## Lo que el core debe agregar al sobre
 
 - `correlationId` (opcional, `^[A-Za-z0-9._:-]{1,100}$`): encender `EVENT_ENVELOPE_CORRELATION_ID=true`.

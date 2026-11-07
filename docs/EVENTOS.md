@@ -214,6 +214,32 @@ en `data` es opcional: por la regla de arriba es un cambio compatible y va como 
 mismo archivo (`eventos:breaking` lo da por compatible). Un `<tipo>.v2.json` solo hará falta el día
 que algo se quite, cambie o se vuelva obligatorio.
 
+## Por RabbitMQ (camino principal)
+
+Con `RABBITMQ_ENABLED=true`, los eventos llegan por una cola y `POST /internal/v1/events` queda de
+respaldo. Es el mismo sobre, validado por el mismo código (`PublicacionEventos.publicar`), con la
+misma transacción y la misma idempotencia por `eventId`; solo cambia el transporte.
+
+| Elemento | Valor |
+| --- | --- |
+| Exchange | `vuelos.eventos` (`topic`, durable) |
+| Mensaje | cuerpo = el sobre JSON exacto; `routingKey` = `eventType`; `messageId` = `eventId`; opcionales `traceparent` (cabecera) y `correlationId` |
+| Cola | `notifier.eventos` (durable, ligada con `#`), reintento `notifier.eventos.retry` (TTL 30 s) y muertos `notifier.eventos.dlq` |
+| `publicado_por` | `amqp:gateway` (por HTTP, el `client_id` del token). Solo se guarda con el evento; no sale por ninguna API ni entra a la auditoría (que es de suscripciones) |
+| Orden | No se garantiza entre eventos; el tercero ordena por `occurredAt` |
+
+| El mensaje... | Qué se hace |
+| --- | --- |
+| Se acepta (como un `202`) o ya estaba con el mismo contenido (como un `200`) | `ack` |
+| Cuerpo que no es JSON, sobre que no cumple el esquema (`400`) o `eventType`/`schemaVersion` desconocidos (`422`) | A la DLQ con `x-estado` = `JSON_INVALIDO` o `SOBRE_INVALIDO` y el motivo en `x-motivo`; `ack`; sin reintento |
+| Mismo `eventId` con otro contenido (`409`) | A la DLQ con `x-estado` = `CONFLICTO`; `ack`; sin reintento |
+| Error transitorio (base caída, timeout...) | A `notifier.eventos.retry` con `x-intentos`; a los 30 s vuelve a la principal. Los intentos se cuentan con `x-death` (y `x-intentos`, por si el broker no lo conserva). Hasta 5 intentos en total; al agotarlos, a la DLQ con `REINTENTOS_AGOTADOS` |
+
+`x-motivo` nombra los campos inválidos, nunca sus valores. El `ack` va después de que el broker
+confirma la copia en la cola de reintento o en la DLQ: si algo falla en medio, el mensaje se
+reentrega y la idempotencia lo absorbe. Topología, variables y cómo reencolar desde la DLQ:
+docs/DEPLOY.md.
+
 ## Respuestas de `POST /internal/v1/events`
 
 | Status | Cuándo |

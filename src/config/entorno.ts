@@ -11,6 +11,7 @@ import {
   MinLength,
   Validate,
   ValidationArguments,
+  ValidateIf,
   ValidatorConstraint,
   ValidatorConstraintInterface,
   validateSync,
@@ -101,6 +102,26 @@ class PuertoMetricas implements ValidatorConstraintInterface {
 
   defaultMessage(): string {
     return 'METRICS_PORT debe ser distinto de PORT (el ingress solo expone PORT)';
+  }
+}
+
+/** RABBITMQ_URL: amqp:// o amqps:// con host. Obligatoria solo con RABBITMQ_ENABLED=true. */
+@ValidatorConstraint({ name: 'urlRabbitmq' })
+class UrlRabbitmq implements ValidatorConstraintInterface {
+  validate(valor: unknown, { object }: ValidationArguments): boolean {
+    if (valor === undefined) return (object as VariablesEntorno).RABBITMQ_ENABLED !== 'true';
+    if (typeof valor !== 'string' || /\s/.test(valor)) return false;
+    try {
+      const url = new URL(valor);
+      return (url.protocol === 'amqp:' || url.protocol === 'amqps:') && url.hostname !== '';
+    } catch {
+      return false;
+    }
+  }
+
+  // No repite el valor: puede llevar usuario y clave.
+  defaultMessage(): string {
+    return 'RABBITMQ_URL es obligatoria con RABBITMQ_ENABLED=true y debe ser una URL amqp:// o amqps://';
   }
 }
 
@@ -255,6 +276,29 @@ export class VariablesEntorno {
   @IsInt({ message: 'METRICS_PORT debe ser un número entero' })
   @IsOptional()
   METRICS_PORT?: number;
+
+  /**
+   * Consumidor de eventos desde RabbitMQ (fase 4b): el camino principal; POST /internal/v1/events
+   * queda de respaldo. Sin valor: false (el notifier funciona como antes, sin tocar el broker).
+   */
+  @IsIn(['true', 'false'], { message: 'RABBITMQ_ENABLED debe ser true o false' })
+  @IsOptional()
+  RABBITMQ_ENABLED?: string;
+
+  /** Broker (amqp://usuario:clave@host:5672). Obligatoria con RABBITMQ_ENABLED=true; nunca se registra. */
+  @Validate(UrlRabbitmq)
+  // IsOptional saltaría la validación con la variable ausente, y con RABBITMQ_ENABLED=true no puede faltar
+  @ValidateIf(
+    (o: VariablesEntorno) => o.RABBITMQ_URL !== undefined || o.RABBITMQ_ENABLED === 'true',
+  )
+  RABBITMQ_URL?: string;
+
+  /** Mensajes sin confirmar que el consumidor admite a la vez. Sin valor: 10. */
+  @Max(1000, { message: 'RABBITMQ_PREFETCH debe estar entre 1 y 1000' })
+  @Min(1, { message: 'RABBITMQ_PREFETCH debe estar entre 1 y 1000' })
+  @IsInt({ message: 'RABBITMQ_PREFETCH debe ser un número entero' })
+  @IsOptional()
+  RABBITMQ_PREFETCH?: number;
 
   /** Duración de la ventana del límite, en segundos. Sin valor: 60. */
   @Max(86_400, { message: 'RATE_LIMIT_WINDOW_SECONDS debe estar entre 1 y 86400' })

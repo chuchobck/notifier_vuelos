@@ -5,6 +5,7 @@ import { CommonModule } from './common/common.module';
 import { validarEntorno } from './config/entorno';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { AutenticacionModule } from './modules/auth/autenticacion.module';
+import { ConsumidorModule } from './modules/consumidor/consumidor.module';
 import { EntregaModule } from './modules/entrega/entrega.module';
 import { EventoModule } from './modules/evento/evento.module';
 import { EventoV2Module } from './modules/evento/v2/evento.v2.module';
@@ -37,6 +38,7 @@ import { rutas } from './routes/index.routes';
     EventoModule,
     EventoV2Module,
     EntregaModule,
+    ConsumidorModule,
 
     // Tabla de rutas: src/routes/index.routes.ts
     RouterModule.register(rutas),
